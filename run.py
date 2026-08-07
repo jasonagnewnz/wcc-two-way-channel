@@ -76,6 +76,31 @@ def seed(store_path: str | None) -> None:
     print(f"\n  {first} advanced to 'responding' so the timeline has something in it.\n")
 
 
+def reset(store_path: str | None, *, assume_yes: bool = False) -> int:
+    """Wipe the log. There is no undo, so it asks first unless told not to.
+
+    On a public demo this is the "clear the graffiti before judging" button:
+
+        python3 run.py --reset --yes && python3 run.py --seed-only
+    """
+    store = SignalStore(store_path) if store_path else SignalStore()
+    count = store.count()
+    if not count:
+        print("  Log is already empty.")
+        return 0
+
+    if not assume_yes:
+        print(f"\n  This deletes all {count} signals in {store.path}.")
+        print("  There is no undo.")
+        if input("  Type 'reset' to confirm: ").strip().lower() != "reset":
+            print("  Cancelled — nothing was deleted.\n")
+            return 1
+
+    discarded = store.reset()
+    print(f"  Deleted {discarded} signals. Log is empty.\n")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="WCC two-way community channel")
     parser.add_argument("--host", default="127.0.0.1",
@@ -87,7 +112,14 @@ def main(argv: list[str] | None = None) -> int:
                         help="add demo reports if the store is empty, then serve")
     parser.add_argument("--seed-only", action="store_true",
                         help="add demo reports and exit without serving")
+    parser.add_argument("--reset", action="store_true",
+                        help="DELETE every signal, then exit. Use before a demo.")
+    parser.add_argument("--yes", action="store_true",
+                        help="skip the confirmation prompt on --reset")
     args = parser.parse_args(argv)
+
+    if args.reset:
+        return reset(args.store, assume_yes=args.yes)
 
     if args.seed or args.seed_only:
         seed(args.store)

@@ -42,19 +42,48 @@ def new_reference() -> str:
     return f"WLG-{body}"
 
 
+class StoreFull(RuntimeError):
+    """The log has hit its ceiling. See SignalStore.max_signals."""
+
+
+# A ceiling on the log, so a public deployment cannot be filled until the
+# disk is gone and the box stops answering. This is survival, not access
+# control: it does not gate anybody, and at ~600 bytes a signal, 50,000 is
+# about 30 MB and vastly more than a demo will ever see. Raise it, or pass
+# max_signals=0 to remove it entirely.
+DEFAULT_MAX_SIGNALS = 50_000
+
+
 class SignalStore:
     """Append-only JSONL store. Safe for concurrent readers and writers within
     one process, which is all ThreadingHTTPServer needs.
     """
 
-    def __init__(self, path: str | Path = DEFAULT_PATH):
+    def __init__(self, path: str | Path = DEFAULT_PATH,
+                 max_signals: int = DEFAULT_MAX_SIGNALS):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.max_signals = max_signals
         self._lock = threading.Lock()
         self._signals: list[dict] = []
         self._by_id: dict[str, dict] = {}
         self._by_idem: dict[str, dict] = {}
         self._load()
+
+    def reset(self) -> int:
+        """Wipe the log. Returns how many signals were discarded.
+
+        Destructive and deliberate — there is no undo. Used by
+        `python3 run.py --reset` to clear a public demo before judging.
+        """
+        with self._lock:
+            discarded = len(self._signals)
+            self._signals.clear()
+            self._by_id.clear()
+            self._by_idem.clear()
+            if self.path.exists():
+                self.path.unlink()
+            return discarded
 
     # -- persistence -------------------------------------------------------
 
@@ -102,6 +131,11 @@ class SignalStore:
             idem = signal.get("idempotency_key")
             if idem and idem in self._by_idem:
                 return self._by_idem[idem]
+
+            if self.max_signals and len(self._signals) >= self.max_signals:
+                raise StoreFull(
+                    f"the signal log has reached its {self.max_signals:,} ceiling; "
+                    "reset it with `python3 run.py --reset`")
 
             stored = dict(signal)
             stored["id"] = new_reference()

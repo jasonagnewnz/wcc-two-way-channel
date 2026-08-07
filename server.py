@@ -32,7 +32,7 @@ from urllib.parse import parse_qs, urlparse
 from core.hazard import lookup_async, summary
 from core.reports import ISSUE_TYPES, STATUS_LABELS, STATUSES, ReportService
 from core.signals import SEVERITIES
-from core.store import SignalStore
+from core.store import SignalStore, StoreFull
 
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
@@ -204,6 +204,10 @@ class Handler(BaseHTTPRequestHandler):
                 media_urls=media or None,
                 reporter_kind=str(body.get("reporter_kind") or "resident")[:40],
             )
+        except StoreFull as exc:
+            # 503, not 500: the request was fine, the service is temporarily
+            # unable to accept it. Says exactly what to do about it.
+            return self._error(503, str(exc))
         except ValueError as exc:
             return self._error(400, str(exc))
 
@@ -243,6 +247,8 @@ class Handler(BaseHTTPRequestHandler):
             signal = self.service.set_status(reference, status, note=note, actor=actor)
         except KeyError:
             return self._error(404, "no report with that reference code")
+        except StoreFull as exc:
+            return self._error(503, str(exc))
         except ValueError as exc:
             return self._error(400, str(exc))
 
