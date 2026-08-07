@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en-NZ">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Report to WCC — two-way community channel</title>
+<meta name="description" content="Report local conditions to Wellington City Council and see what happens to your report. Impact Lab Wellington, Team 6, Problem 02.">
+<meta name="color-scheme" content="light dark">
+<!-- Inline data URI, not a file: keeps the app to three assets and avoids a
+     404 on every page load. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b5cd5'/%3E%3Cpath d='M9 12h14M9 17h10' stroke='white' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='22' cy='21' r='3.4' fill='%234cc38a'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="mark" aria-hidden="true"></span>
+    <div>
+      <strong>Community &harr; WCC</strong>
+      <span class="sub">Two-way reporting channel</span>
+    </div>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button class="tab is-active" data-view="report" role="tab">Report an issue</button>
+    <button class="tab" data-view="mine" role="tab">My reports <span class="pill" id="mine-count" hidden></span></button>
+    <button class="tab" data-view="ops" role="tab">WCC view</button>
+  </nav>
+</header>
+
+<p class="disclaimer" role="note">
+  <strong>Prototype.</strong> Built in a day for Impact Lab Wellington. Not a live council service.
+  Map layers are hazard <em>planning</em> data, not live emergency information.
+  <strong>In an emergency, call 111.</strong>
+</p>
+
+<main>
+
+  <!-- ── Report ─────────────────────────────────────────────── -->
+  <section class="view is-active" id="view-report">
+    <div class="split">
+      <form id="report-form" class="card" autocomplete="off">
+        <h1>What's happening?</h1>
+
+        <fieldset>
+          <legend>Type of issue</legend>
+          <div class="chips" id="issue-types"></div>
+        </fieldset>
+
+        <label>
+          <span>In one line</span>
+          <input name="title" maxlength="200" required
+                 placeholder="Water over the road on Hutt Road">
+        </label>
+
+        <label>
+          <span>Any detail that helps <em>optional</em></span>
+          <textarea name="description" rows="3" maxlength="2000"
+                    placeholder="Southbound lane is under water. Cars are turning around."></textarea>
+        </label>
+
+        <fieldset>
+          <legend>How bad is it?</legend>
+          <div class="chips" id="severities"></div>
+        </fieldset>
+
+        <fieldset class="location">
+          <legend>Where</legend>
+          <p class="hint">Tap the map, or use your location. A rough pin is far better than none.</p>
+          <div class="row">
+            <button type="button" class="btn ghost" id="locate">Use my location</button>
+            <output id="location-readout" class="readout">No location set</output>
+          </div>
+          <label>
+            <span>Place name <em>optional</em></span>
+            <input name="place_name" maxlength="200" placeholder="Ngauranga">
+          </label>
+        </fieldset>
+
+        <fieldset>
+          <legend>You are reporting as</legend>
+          <div class="chips" id="reporter-kinds"></div>
+        </fieldset>
+
+        <label>
+          <span>Link to a photo <em>optional</em></span>
+          <input name="media_url" type="url" maxlength="2000" placeholder="https://...">
+        </label>
+
+        <button type="submit" class="btn primary" id="submit-btn">Send to WCC</button>
+        <p class="formnote">
+          No account, no login. You'll get a reference code — that code is how you check back.
+        </p>
+        <p class="error" id="report-error" hidden></p>
+      </form>
+
+      <div class="mapwrap card">
+        <div class="maphead">
+          <h2>Wellington</h2>
+          <div class="legend" id="legend"></div>
+        </div>
+        <div id="map-report" class="map"></div>
+        <p class="attrib" id="attrib"></p>
+      </div>
+    </div>
+
+    <!-- success panel -->
+    <div class="receipt card" id="receipt" hidden>
+      <div class="tick" aria-hidden="true">✓</div>
+      <h2>Received by Wellington City Council</h2>
+      <p class="lede">Your reference code</p>
+      <p class="ref" id="receipt-ref"></p>
+      <p class="lede">Write it down or screenshot it. It's saved on this device too.</p>
+      <div id="receipt-context" class="context"></div>
+      <div class="row">
+        <button class="btn primary" id="receipt-track">Track this report</button>
+        <button class="btn ghost" id="receipt-again">Report something else</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── My reports ─────────────────────────────────────────── -->
+  <section class="view" id="view-mine">
+    <div class="card">
+      <h1>My reports</h1>
+      <p class="hint">
+        Updates appear here on their own. You don't need to refresh, and you don't need to ring anyone.
+      </p>
+      <form class="row lookup" id="lookup-form">
+        <label class="grow">
+          <span>Have a code from another device?</span>
+          <input name="reference" placeholder="WLG-XXXXX" maxlength="9">
+        </label>
+        <button class="btn ghost" type="submit">Look it up</button>
+      </form>
+      <p class="error" id="lookup-error" hidden></p>
+    </div>
+    <div id="mine-list" class="stack"></div>
+  </section>
+
+  <!-- ── WCC ops ────────────────────────────────────────────── -->
+  <section class="view" id="view-ops">
+    <div class="split wide">
+      <div class="mapwrap card">
+        <div class="maphead">
+          <h2>Incoming reports</h2>
+          <span class="counter" id="ops-counter"></span>
+        </div>
+        <div id="map-ops" class="map"></div>
+        <p class="attrib">Click a pin to open the report.</p>
+      </div>
+      <div class="card scroller">
+        <h2>Queue</h2>
+        <p class="hint">
+          Reports within 250&nbsp;m of each other, of the same type, inside six hours are
+          grouped as one issue. Tap a status — the reporter sees it immediately.
+        </p>
+        <div id="ops-list" class="stack"></div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <span>Team 6 · Problem 02 · Impact Lab Wellington</span>
+  <a href="/api/geojson">/api/geojson</a>
+  <a href="/api/signals">/api/signals</a>
+  <a href="/api/health">/api/health</a>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>
