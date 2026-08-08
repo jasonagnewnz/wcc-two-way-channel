@@ -309,7 +309,7 @@ function showView(name) {
   if (name === 'wall') renderWall();
   if (name === 'cards') renderCardsView();
   if (name === 'community') renderCommunity().then(fillCommunityChips);
-  if (name === 'live') renderLive();
+  if (name === 'live') { renderLive(); renderAdaptation(); }
 }
 
 // ── report form ──────────────────────────────────────────────────────────
@@ -685,6 +685,7 @@ async function boot() {
   }
 
   await renderLive();
+  renderAdaptation();
   await refresh(true);
   setInterval(refresh, 3000);
 }
@@ -2056,4 +2057,40 @@ function wireResponders(data) {
       } catch (err) { alert(err.message); btn.disabled = false; }
     });
   });
+}
+
+/* ── climate & equity signal ─────────────────────────────────────────────
+ *
+ * The honest version of the vision doc's §9: where are today's reports
+ * landing, against hazard layers WCC already publishes. Correlation across one
+ * event, never a trend — with hours of data, a trend would be an invention.
+ */
+
+async function renderAdaptation() {
+  let data;
+  try { data = await api('/api/adaptation'); } catch (_) { return; }
+
+  const panel = $('#adapt-panel');
+  if (!data.enough) {
+    // Below the sample floor it says so rather than showing a percentage of
+    // three and letting it read as a finding.
+    panel.hidden = false;
+    $('#adapt-sample').textContent = `${data.resolved} of ${data.min_sample} needed`;
+    $('#adapt-caveat').textContent =
+      'Not enough located reports yet to say anything useful. This panel stays quiet until there are.';
+    $('#adapt-findings').innerHTML = '';
+    $('#adapt-sources').textContent = data.sources || '';
+    return;
+  }
+
+  panel.hidden = false;
+  $('#adapt-sample').textContent =
+    `${data.resolved} located report${data.resolved === 1 ? '' : 's'} checked`;
+  $('#adapt-caveat').textContent = data.caveat;
+  $('#adapt-sources').textContent = data.sources || '';
+  $('#adapt-findings').innerHTML = (data.findings || []).map(f => `
+    <div class="finding f-${esc(f.kind)}">
+      <div class="what">${esc(f.text)}</div>
+      <div class="reading">${esc(f.reading)}</div>
+    </div>`).join('') || '<p class="empty">No signal in this sample.</p>';
 }

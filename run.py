@@ -54,6 +54,14 @@ DEMO_REPORTS = [
          issue_type="power-or-water", lat=-41.2950, lng=174.7690,
          place_name="Aro Valley", severity="moderate", reporter_kind="hub",
          author_id="demo-aro-valley-community-hub"),
+    # Deliberately inside the mapped 1% AEP flood extent for Porirua Stream,
+    # so the adaptation panel has a finding that is actually true rather than
+    # a demo that only works because the numbers were chosen to work.
+    dict(title="Stream coming up over the bank near the walkway",
+         description="Water is out of the channel and across the path. Rising while I watch it.",
+         issue_type="flooding", lat=-41.2124, lng=174.8229,
+         place_name="Tawa", severity="severe", reporter_kind="resident",
+         author_id="demo-priya"),
     dict(title="Elderly resident needs help getting out",
          description="Ground floor flat taking water, resident uses a walker and cannot manage the step.",
          issue_type="people-need-help", lat=-41.3110, lng=174.7810,

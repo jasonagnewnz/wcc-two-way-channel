@@ -608,3 +608,117 @@ dialog h2 { margin-bottom: .4em; }
 .reqpin { fill: #d64545; stroke: var(--card); stroke-width: 1.5; }
 .issuepin { fill: var(--responding); stroke: var(--card); stroke-width: 1.5; }
 .reqpin.is-urgent { stroke: #d64545; stroke-width: 2.5; }
+
+
+/* ── climate & equity signal ─────────────────────────────── */
+
+.adapt { margin-top: 16px; border-left: 3px solid var(--resolved); }
+.adapt-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; }
+.finding {
+  border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px;
+  background: var(--paper);
+}
+.finding .what { font-weight: 600; font-size: .9rem; }
+.finding .reading { font-size: .82rem; color: var(--ink-2); margin-top: 4px; }
+.finding.f-equity { border-left: 3px solid var(--reviewing); }
+.finding.f-flood  { border-left: 3px solid var(--responding); }
+.finding.f-tsunami{ border-left: 3px solid #d64545; }
+
+/* ── polish pass ─────────────────────────────────────────────
+   Driven by an actual measurement across four viewports, not taste:
+   the tab bar wrapped into 206px of chrome on a phone (a third of the
+   screen before any content), and twelve controls were under the 32px
+   touch-target minimum. */
+
+/* Tabs scroll sideways instead of wrapping. One row, always. */
+.tabs {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  /* Snap so a half-cut tab doesn't sit at the edge looking like a bug. */
+  scroll-snap-type: x proximity;
+  max-width: 100%;
+  padding-bottom: 2px;
+  margin: 0 -4px;
+  padding-inline: 4px;
+}
+.tabs::-webkit-scrollbar { display: none; }
+.tab { flex: 0 0 auto; scroll-snap-align: start; min-height: 36px; }
+
+@media (max-width: 900px) {
+  .topbar {
+    gap: 8px;
+    padding: 8px 12px;
+    /* brand | who on row one, tabs full-width on row two */
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas: "brand who" "tabs tabs";
+  }
+  .brand { grid-area: brand; }
+  .whoarea { grid-area: who; }
+  .tabs { grid-area: tabs; }
+  .brand .sub { display: none; }
+  main { padding: 12px; }
+  .nearbar { padding: 8px 12px; }
+  .nearbar .nb-label { flex-basis: 100%; }
+}
+
+/* Touch targets. Anything a finger has to hit gets 36px. */
+.chip, .btn, .chan, input, select, textarea, .tab { min-height: 36px; }
+.chip { display: inline-flex; align-items: center; }
+.btn.tiny { min-height: 32px; }
+.layers .chip { min-height: 32px; }
+
+/* Focus that is visible without being loud, for keyboard users. */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* Motion, kept subtle and switched off for anyone who asked. */
+.card, .chip, .btn, .liverow, .report, .stackcard { transition: border-color .15s ease, background .15s ease, transform .15s ease; }
+.liverow:hover, .stackcard:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+.btn:active, .chip:active { transform: translateY(1px); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+/* The landing map is the hero — give it room and let the page breathe. */
+#view-live h1 { font-size: clamp(1.35rem, 2.6vw, 1.75rem); }
+.maphead { align-items: baseline; }
+.map { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 4%, transparent); }
+.mapwrap { padding: 14px; }
+
+/* Empty states should look deliberate rather than broken. */
+.empty {
+  border: 1px dashed var(--line); border-radius: 9px;
+  background: color-mix(in srgb, var(--ink-3) 4%, transparent);
+}
+
+/* Scrollers get a soft fade so it is obvious there is more below. */
+.scroller { -webkit-overflow-scrolling: touch; }
+
+/* Long place names and URLs must never push a card wider than the screen. */
+.liverow, .stackcard, .report, .cardrow, .modrow { overflow-wrap: anywhere; }
+footer a { display: inline-flex; align-items: center; min-height: 32px; padding: 0 2px; }
+
+@media (max-width: 900px) {
+  /* Half a phone screen was going on chrome before the map appeared. The
+     disclaimer stays — it is a promise, not decoration — but it does not need
+     to be set at body size. */
+  .brand strong { white-space: nowrap; font-size: .88rem; }
+  .mark { width: 22px; height: 22px; }
+  .disclaimer { font-size: .72rem; line-height: 1.4; padding: 7px 12px; }
+  .commsbanner { font-size: .78rem; padding: 8px 12px; gap: 6px; }
+  .cb-text { flex-basis: 100%; }
+  .cb-meta { display: none; }
+  .nearbar { gap: 6px; padding: 7px 12px; }
+  .nearbar .nb-label { font-size: .76rem; margin-bottom: -2px; }
+  .layers { gap: 4px; }
+  .layers .chip { font-size: .7rem; padding: 4px 8px; }
+  #view-live h1 { font-size: 1.2rem; }
+  .maphead { flex-wrap: wrap; gap: 4px; }
+  .map.tall { aspect-ratio: 1 / 1; }
+}

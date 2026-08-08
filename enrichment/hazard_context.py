@@ -44,9 +44,25 @@ def _liquefaction_risk(lat: float, lng: float) -> str | None:
     return _first_attr("liquefaction-vulnerability", lat, lng, "Category")
 
 
+# `flood-hazard-areas` is a whole SERVICE, not a layer. Querying it without a
+# layer= raises GisError, which _first_attr swallows — so this returned None
+# for every point in Wellington, silently, forever. Layer 3 is the 1% AEP
+# extent (the standard 100-year flood) and the field is `Label`, not the
+# guessed `Hazard_Class`. Verified against the live service 2026-08-08.
+FLOOD_LAYER = 3
+
+
 def _flood_hazard(lat: float, lng: float) -> str | None:
-    """Flood hazard classification at this point."""
-    return _first_attr("flood-hazard-areas", lat, lng, "Hazard_Class")
+    """Flood hazard classification at this point (1% AEP extent)."""
+    try:
+        rows = wcc_gis.features("flood-hazard-areas", layer=FLOOD_LAYER,
+                                at=(lat, lng), limit=1)
+        if not rows:
+            return None
+        row = rows[0]
+        return row.get("Label") or row.get("Title") or row.get("Description")
+    except wcc_gis.GisError:
+        return None
 
 
 def _fault_zone(lat: float, lng: float, radius_m: int = 500) -> dict | None:

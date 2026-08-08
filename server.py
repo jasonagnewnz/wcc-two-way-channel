@@ -36,6 +36,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from core.adaptation import summarise as adaptation_summary
 from core.chat import ChatService, channel_kind, redact_for_public
 from core.community import (
     APPROVED, EVIDENCE_TYPE, FEED_KINDS, FEED_TYPE, PENDING, RESOURCE_KINDS,
@@ -446,6 +447,9 @@ class Handler(BaseHTTPRequestHandler):
                 },
                 "official_view": official,
             })
+
+        if path == "/api/adaptation":
+            return self._send(200, adaptation_summary(svc.store, svc.module_id))
 
         if path == "/api/community/queue":
             if self.require("moderate.flag") is None:

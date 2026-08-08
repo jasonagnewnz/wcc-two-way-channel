@@ -287,6 +287,49 @@ cards.
 
 ---
 
+## Sustainability
+
+Two claims, both checkable.
+
+### Climate adaptation, stated honestly
+
+`reference/vision-doc-breakdown.md` §9 asks for reports to accumulate over
+years into climate-adaptation evidence, then rules that out correctly: there
+is no multi-year history and there will not be one by 16:00. Its own suggested
+alternative is what is built — **spatial rather than temporal**.
+
+The Live map carries a **Climate & equity signal** panel that asks one
+question of today's reports: *where are they landing?*
+
+- Reports inside areas WCC has **already mapped as flood-prone** are
+  corroboration of the hazard model by the people who live there.
+- The **median deprivation decile** of affected areas is an equity signal
+  about who carries the impact — the part adaptation funding usually decides
+  badly.
+
+It is **not a trend and does not pretend to be one.** Nothing says "emerging"
+or "increasing", because with hours of data that would be an invention. Every
+number carries its sample size, the panel stays quiet below four located
+reports rather than showing a percentage of three, and "correlation across a
+single event, not a trend" is on screen and in the API payload.
+
+### Digital footprint
+
+The whole application is ~400 KB, served from one small VM, with **no
+framework, no CDN, no build step and no tile server**.
+
+A conventional slippy map fetches 100–300 tiles per view from someone else's
+data centre, and again on every pan and zoom. This map is **one request** for
+baked GeoJSON, rendered as inline SVG, that then works offline indefinitely.
+The address gazetteer is baked for the same reason — a geocoding call per
+lookup, forever, replaced by 2,829 places shipped once.
+
+That is not a green badge; it is the same decision as everything else here.
+The thing that survives a dead network and the thing that costs least to run
+are the same thing.
+
+---
+
 ## It composes
 
 The brief asks for modules that feed one shared common operating picture,
