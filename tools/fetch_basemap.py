@@ -177,12 +177,62 @@ def hub_layer() -> list[dict]:
     return features
 
 
+def gazetteer() -> list[dict]:
+    """Street and suburb names with a point, for offline address lookup.
+
+    Why bother when a geocoding API exists: typing your address into a service
+    to find out what is happening on your street means telling that service
+    where you live. Baking the index means the lookup happens in the browser,
+    the address never leaves the device, and it still works with no
+    connectivity.
+
+    Deduped to one point per (street, suburb) — 5,000 road segments collapse to
+    a few thousand names, which is small enough to ship.
+    """
+    print("  roads (gazetteer) ...", end=" ", flush=True)
+    started = time.time()
+    seen: dict[tuple, dict] = {}
+    for feature in wcc_gis.all_features("roads", bbox=wcc_gis.WELLINGTON,
+                                        max_features=6000):
+        name = (feature.get("ramm_alias") or "").strip()
+        suburb = (feature.get("suburb") or "").strip()
+        lat, lng = feature.get("lat"), feature.get("lng")
+        if not name or lat is None or lng is None:
+            continue
+        key = (name.lower(), suburb.lower())
+        if key in seen:
+            continue
+        seen[key] = {"n": name, "s": suburb,
+                     "y": round(float(lat), 4), "x": round(float(lng), 4)}
+
+    # Suburb centroids too, so "Karori" alone resolves.
+    by_suburb: dict[str, list] = {}
+    for entry in seen.values():
+        if entry["s"]:
+            by_suburb.setdefault(entry["s"], []).append(entry)
+    for suburb, entries in by_suburb.items():
+        key = (suburb.lower(), "")
+        if key not in seen:
+            seen[key] = {
+                "n": suburb, "s": "",
+                "y": round(sum(e["y"] for e in entries) / len(entries), 4),
+                "x": round(sum(e["x"] for e in entries) / len(entries), 4),
+            }
+
+    places = sorted(seen.values(), key=lambda e: e["n"])
+    print(f"{len(places)} places in {time.time() - started:.1f}s")
+    return places
+
+
 def main() -> int:
     print("\nFetching WCC layers (live, from council servers):")
     features = zone_layer() + hub_layer()
 
+    places = gazetteer()
+
     payload = {
         "type": "FeatureCollection",
+        "places": places,
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "attribution": (
             "Tsunami evacuation zones and Community Emergency Hubs: "

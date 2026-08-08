@@ -487,3 +487,23 @@ dialog h2 { margin-bottom: .4em; }
   body > *:not(.printarea) { display: none !important; }
   .printcard { border-color: #000; box-shadow: none; page-break-inside: avoid; }
 }
+
+
+/* ── near-me filter ──────────────────────────────────────── */
+
+.nearbar {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  padding: 9px 16px; border-bottom: 1px solid var(--line);
+  background: var(--card); font-size: .82rem;
+}
+.nb-label { font-weight: 600; color: var(--ink-2); }
+.nb-form { display: contents; }
+.nearbar input { width: auto; flex: 1 1 190px; max-width: 260px; padding: 7px 10px; font-size: .84rem; }
+.nearbar .chip { padding: 5px 10px; font-size: .78rem; }
+.nb-state { color: var(--ink-3); font-size: .78rem; }
+.nb-state.is-set { color: var(--resolved); font-weight: 600; }
+
+.pin.is-far { opacity: .18; }
+.hub.is-far { opacity: .12; }
+.near-ring { fill: color-mix(in srgb, var(--accent) 7%, transparent); stroke: var(--accent); stroke-width: 1.2; stroke-dasharray: 6 4; }
+.near-dot { fill: var(--accent); stroke: var(--card); stroke-width: 2; }

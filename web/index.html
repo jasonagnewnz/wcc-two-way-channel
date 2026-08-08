@@ -82,6 +82,22 @@
   <strong>In an emergency, call 111.</strong>
 </p>
 
+<!-- Near-me filter. The coordinates are used in this browser only: filtering
+     happens client-side against data the page already has, and nothing about
+     where you are is ever sent to the server. -->
+<div class="nearbar" id="nearbar">
+  <span class="nb-label">Show me what's happening</span>
+  <button class="btn ghost compact" id="near-locate">Near me</button>
+  <form id="near-form" class="nb-form">
+    <input id="near-address" list="near-places" maxlength="80"
+           placeholder="or type a street or suburb" autocomplete="off">
+    <datalist id="near-places"></datalist>
+  </form>
+  <div class="chips" id="near-radius"></div>
+  <span class="nb-state" id="near-state">Whole city</span>
+  <button class="btn ghost compact" id="near-clear" hidden>Show everywhere</button>
+</div>
+
 <main>
 
   <!-- ── Report ─────────────────────────────────────────────── -->

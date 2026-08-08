@@ -28,6 +28,7 @@ const state = {
   boardChannel: 'wellington',
   channels: { public: [], agency: [] },
   banner: null,
+  near: null,        // {lat,lng,radius,label} — this browser only, never sent
   token: null,       // session token from a redeemed card
   session: null,     // {role, holder, permissions} — decided by the server
   roles: {},
@@ -513,11 +514,15 @@ function groupLabel(groupId, reports) {
 }
 
 function renderOps() {
-  const reports = state.reports.slice().reverse();
+  const all = state.reports.slice().reverse();
+  const reports = all.filter(withinNear);
+  const hidden = all.length - reports.length;
   $('#ops-counter').textContent =
-    `${reports.length} report${reports.length === 1 ? '' : 's'}`;
+    `${reports.length} report${reports.length === 1 ? '' : 's'}` +
+    (hidden ? ` · ${hidden} outside ${state.near.radius} km` : '');
 
   if (opsMap) {
+    drawNearRing(opsMap);
     opsMap.drawPins(reports, {
       onClick: report => {
         state.openOps = report.id;
@@ -625,6 +630,7 @@ async function boot() {
   loadMine();
   ensureIdentity();
   loadToken();
+  loadNear();
   updateMineCount();
 
   $$('.tab').forEach(tab => {
@@ -636,6 +642,7 @@ async function boot() {
   initLookup();
   initBoard();
   initWall();
+  initNear();
   initAuth();
   initCards();
   await refreshSession();
@@ -660,6 +667,8 @@ async function boot() {
     state.basemap = await api('/api/basemap');
     reportMap.drawBasemap(state.basemap);
     opsMap.drawBasemap(state.basemap);
+    fillPlaceSuggestions();
+    drawNearRing(reportMap);
     $('#attrib').textContent = state.basemap.attribution || '';
   } catch (_) {
     $('#attrib').textContent = 'Basemap unavailable — run tools/fetch_basemap.py.';
@@ -1299,4 +1308,205 @@ async function signInFromUrl() {
   params.delete('card');
   const rest = params.toString();
   window.history.replaceState({}, '', window.location.pathname + (rest ? '?' + rest : ''));
+}
+
+/* ── "what's happening near me" ──────────────────────────────────────────
+ *
+ * Your location is used in this browser and nowhere else. Filtering happens
+ * client-side against data the page already holds, and the address lookup runs
+ * against a gazetteer baked into basemap.json — 2,800 Wellington streets and
+ * suburbs shipped with the app.
+ *
+ * That is the point, not an optimisation. Typing your address into a
+ * geocoding service to find out what is happening on your street means
+ * telling that service where you live. Doing it locally means nobody learns
+ * anything, and it still works with no connectivity.
+ */
+
+const NEAR_KEY = 'wcc-two-way/near';
+const RADII = [1, 5, 10, 20];
+
+function loadNear() {
+  try { state.near = JSON.parse(localStorage.getItem(NEAR_KEY) || 'null'); }
+  catch (_) { state.near = null; }
+  if (state.near && !RADII.includes(state.near.radius)) state.near.radius = 5;
+}
+
+function saveNear(near) {
+  state.near = near;
+  try {
+    if (near) localStorage.setItem(NEAR_KEY, JSON.stringify(near));
+    else localStorage.removeItem(NEAR_KEY);
+  } catch (_) {}
+  renderNear();
+  if (state.view === 'ops') renderOps();
+  if (state.view === 'report' && reportMap) drawNearRing(reportMap);
+}
+
+/** Metres between two points. Same formula as the server's grouping, so the
+ *  radius a resident sees matches the radius a duty officer sees. */
+function haversineM(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const p1 = lat1 * Math.PI / 180, p2 = lat2 * Math.PI / 180;
+  const dp = (lat2 - lat1) * Math.PI / 180, dl = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+function withinNear(item) {
+  if (!state.near) return true;
+  if (item.lat == null || item.lng == null) return true;  // unplaced: never hide
+  return haversineM(state.near.lat, state.near.lng, item.lat, item.lng)
+         <= state.near.radius * 1000;
+}
+
+function renderNear() {
+  const label = $('#near-state');
+  const near = state.near;
+  label.textContent = near ? `${near.label} · within ${near.radius} km` : 'Whole city';
+  label.classList.toggle('is-set', !!near);
+  $('#near-clear').hidden = !near;
+
+  $$('#near-radius .chip').forEach(chip => {
+    chip.setAttribute('aria-pressed',
+      String(!!near && Number(chip.dataset.km) === near.radius));
+  });
+}
+
+// The council publishes streets abbreviated — "Aro St", "Hutt Rd". People
+// type either form, and someone looking for their own street should not have
+// to guess which one the data used. Both sides are folded to one canonical
+// short form before matching.
+const STREET_TYPES = {
+  street: 'st', st: 'st', road: 'rd', rd: 'rd', avenue: 'ave', ave: 'ave',
+  av: 'ave', drive: 'dr', dr: 'dr', terrace: 'tce', tce: 'tce', ter: 'tce',
+  crescent: 'cres', cres: 'cres', place: 'pl', pl: 'pl', lane: 'ln', ln: 'ln',
+  close: 'cl', cl: 'cl', court: 'ct', ct: 'ct', parade: 'pde', pde: 'pde',
+  grove: 'gr', gr: 'gr', way: 'way', quay: 'quay', qy: 'quay',
+  boulevard: 'blvd', blvd: 'blvd', esplanade: 'esp', esp: 'esp',
+  highway: 'hwy', hwy: 'hwy', walk: 'walk', rise: 'rise', view: 'view',
+};
+
+function canonicalPlace(text) {
+  const words = String(text || '')
+    .toLowerCase()
+    .replace(/[.,]/g, ' ')
+    // Drop a leading street number: "42 Aro Street" is Aro Street.
+    .replace(/^\s*\d+[a-z]?[\s,/-]+/, '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(w => STREET_TYPES[w] || w);
+  return words.join(' ');
+}
+
+/** Fuzzy-match a typed place against the baked gazetteer. */
+function findPlace(query) {
+  const places = (state.basemap && state.basemap.places) || [];
+  const q = canonicalPlace(query);
+  if (!q || !places.length) return null;
+
+  if (!state._placeIndex) {
+    state._placeIndex = places.map(p => ({ p, key: canonicalPlace(p.n) }));
+  }
+  const index = state._placeIndex;
+
+  const exact = index.find(e => e.key === q);
+  if (exact) return exact.p;
+  const starts = index.find(e => e.key.startsWith(q));
+  if (starts) return starts.p;
+  const contains = index.find(e => e.key.includes(q));
+  return contains ? contains.p : null;
+}
+
+function initNear() {
+  const wrap = $('#near-radius');
+  wrap.textContent = '';
+  for (const km of RADII) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip';
+    chip.dataset.km = km;
+    chip.textContent = `${km} km`;
+    chip.addEventListener('click', () => {
+      if (!state.near) return showError('#report-error',
+        'Set where you are first — "Near me", or type a street.');
+      saveNear({ ...state.near, radius: km });
+    });
+    wrap.appendChild(chip);
+  }
+
+  $('#near-locate').addEventListener('click', () => {
+    if (!navigator.geolocation) return;
+    const btn = $('#near-locate');
+    btn.disabled = true; btn.textContent = 'Locating…';
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        saveNear({
+          lat: pos.coords.latitude, lng: pos.coords.longitude,
+          radius: (state.near && state.near.radius) || 5, label: 'Where you are',
+        });
+        btn.disabled = false; btn.textContent = 'Near me';
+      },
+      () => {
+        btn.disabled = false; btn.textContent = 'Near me';
+        $('#near-address').focus();
+      },
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 });
+  });
+
+  $('#near-form').addEventListener('submit', event => {
+    event.preventDefault();
+    const place = findPlace($('#near-address').value);
+    if (!place) {
+      $('#near-state').textContent = 'No street or suburb by that name';
+      return;
+    }
+    saveNear({
+      lat: place.y, lng: place.x,
+      radius: (state.near && state.near.radius) || 5,
+      label: place.s ? `${place.n}, ${place.s}` : place.n,
+    });
+    $('#near-address').value = '';
+  });
+
+  $('#near-clear').addEventListener('click', () => saveNear(null));
+  renderNear();
+}
+
+/** Populate the datalist once the gazetteer is loaded. */
+function fillPlaceSuggestions() {
+  const places = (state.basemap && state.basemap.places) || [];
+  const list = $('#near-places');
+  list.textContent = '';
+  // A datalist of 2,800 entries is fine in the DOM but pointless to render in
+  // full; suburbs first, they are what people actually type.
+  for (const place of places.filter(p => !p.s).slice(0, 120)) {
+    const option = document.createElement('option');
+    option.value = place.n;
+    list.appendChild(option);
+  }
+}
+
+/** Draw the radius on a map so "within 5 km" is a thing you can see. */
+function drawNearRing(map) {
+  const layer = map.layers.pick;
+  if (!state.near) { layer.textContent = ''; return; }
+  layer.textContent = '';
+
+  const cx = map.x(state.near.lng), cy = map.y(state.near.lat);
+  // Convert km to viewBox units along longitude, correcting for latitude.
+  const degrees = state.near.radius / (111.32 * Math.cos(state.near.lat * Math.PI / 180));
+  const r = Math.abs(map.x(state.near.lng + degrees) - cx);
+
+  const ring = document.createElementNS(SVG_NS, 'circle');
+  ring.setAttribute('cx', cx.toFixed(1));
+  ring.setAttribute('cy', cy.toFixed(1));
+  ring.setAttribute('r', r.toFixed(1));
+  ring.setAttribute('class', 'near-ring');
+  const dot = document.createElementNS(SVG_NS, 'circle');
+  dot.setAttribute('cx', cx.toFixed(1));
+  dot.setAttribute('cy', cy.toFixed(1));
+  dot.setAttribute('r', '4');
+  dot.setAttribute('class', 'near-dot');
+  layer.append(ring, dot);
 }
