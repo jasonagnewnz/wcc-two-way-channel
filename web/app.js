@@ -33,6 +33,7 @@ const state = {
   queue: null,
   live: null,
   layers: {},
+  news: null,
   token: null,       // session token from a redeemed card
   session: null,     // {role, holder, permissions} — decided by the server
   roles: {},
@@ -310,6 +311,8 @@ function showView(name) {
   if (name === 'cards') renderCardsView();
   if (name === 'community') renderCommunity().then(fillCommunityChips);
   if (name === 'live') { renderLive(); renderAdaptation(); }
+  if (name === 'news') renderNews();
+  if (name === 'help') fillHelpLinks();
 }
 
 // ── report form ──────────────────────────────────────────────────────────
@@ -626,6 +629,7 @@ async function refresh(force = false) {
     if (state.view === 'cards') renderCardsView();
     if (state.view === 'community') renderCommunity();
     if (state.view === 'live') renderLive();
+    if (state.view === 'news') renderNews();
   } catch (_) {
     // Offline or the server restarted. Keep the last good render on screen
     // and try again on the next tick rather than blanking the page.
@@ -653,6 +657,7 @@ async function boot() {
   initNear();
   initCommunity();
   initLive();
+  initNews();
   initAuth();
   initCards();
   await refreshSession();
@@ -1051,19 +1056,20 @@ function renderWho() {
   $('#signin-btn').hidden = signedIn;
   $('#signout-btn').hidden = !signedIn;
 
-  // The two official surfaces are hidden rather than merely refused. Showing
-  // a tab that 403s teaches people the app is broken.
   const canAgency = signedIn && state.session.permissions.includes('post.agency');
   const canIssue = signedIn && state.session.permissions.includes('card.issue');
-  const wallTab = $('[data-view="wall"]');
-  const opsTab = $('[data-view="ops"]');
-  if (wallTab) wallTab.hidden = !canAgency;
-  if (opsTab) opsTab.hidden = !(signedIn &&
-    state.session.permissions.includes('report.status'));
+  const canStatus = signedIn && state.session.permissions.includes('report.status');
+
+  // Official tabs stay VISIBLE and explain themselves when locked. Hiding
+  // them made the whole communications hub appear to vanish for anyone not
+  // signed in, which reads as the feature being gone rather than gated —
+  // and a demo audience cannot ask to see something they cannot see exists.
+  $('#wall-locked').hidden = canAgency;
+  $('#wall-panel').hidden = !canAgency;
+  $('#ops-locked').hidden = canStatus;
+  $('#ops-panel').hidden = !canStatus;
   $('#cards-locked').hidden = canIssue;
   $('#cards-panel').hidden = !canIssue;
-
-  if (!canAgency && state.view === 'wall') showView('board');
 }
 
 function initAuth() {
@@ -1080,6 +1086,11 @@ function initAuth() {
   $('#card-code').addEventListener('keydown', e => {
     if (e.key === 'Enter') { e.preventDefault(); doSignIn(); }
   });
+
+  for (const id of ['#wall-signin', '#ops-signin']) {
+    const btn = $(id);
+    if (btn) btn.addEventListener('click', () => $('#signin-btn').click());
+  }
 
   $('#signout-btn').addEventListener('click', async () => {
     try { await api('/api/auth/signout', { method: 'POST' }); } catch (_) {}
@@ -2093,4 +2104,116 @@ async function renderAdaptation() {
       <div class="what">${esc(f.text)}</div>
       <div class="reading">${esc(f.reading)}</div>
     </div>`).join('') || '<p class="empty">No signal in this sample.</p>';
+}
+
+/* ── news: periodic updates, tagged by agency ────────────────────────────
+ *
+ * The agency is a field rather than something baked into the text, so a
+ * reader can filter to the source they trust and an after-action review can
+ * ask who said what.
+ */
+
+async function renderNews() {
+  const params = new URLSearchParams();
+  if (state.draft.newsCategory && state.draft.newsCategory !== 'all') {
+    params.set('category', state.draft.newsCategory);
+  }
+  if (state.draft.newsAgency && state.draft.newsAgency !== 'all') {
+    params.set('agency', state.draft.newsAgency);
+  }
+
+  let data;
+  try { data = await api('/api/news?' + params); } catch (_) { return; }
+  state.news = data;
+
+  if (!state._newsChips) {
+    state._newsChips = true;
+    state.draft.newsCategory = 'all';
+    state.draft.newsAgency = 'all';
+    const cats = { all: 'Everything', ...data.categories };
+    const orgs = { all: 'All agencies', ...data.agencies };
+    chipGroup($('#news-categories'), Object.keys(cats), 'newsCategory', cats);
+    chipGroup($('#news-agencies'), Object.keys(orgs), 'newsAgency', orgs);
+    $$('#news-categories .chip, #news-agencies .chip')
+      .forEach(c => c.addEventListener('click', () => setTimeout(renderNews, 0)));
+
+    state.draft.postAgency = 'wcc-em';
+    state.draft.postCategory = 'general';
+    chipGroup($('#news-post-agency'), Object.keys(data.agencies), 'postAgency', data.agencies);
+    chipGroup($('#news-post-category'), Object.keys(data.categories), 'postCategory', data.categories);
+  }
+
+  $('#news-form').hidden = !data.can_post;
+
+  const list = $('#news-list');
+  if (!data.news.length) {
+    list.innerHTML = '<p class="empty">No updates matching that filter.</p>';
+    return;
+  }
+  list.innerHTML = data.news.map(n => `
+    <article class="newsitem ${n.urgent ? 'is-urgent' : ''}">
+      <div class="head">
+        <span class="src">${esc(n.agency_name)}</span>
+        <span class="cat">${esc(n.category_label)}</span>
+        ${n.area ? `<span class="at">${esc(n.area)}</span>` : ''}
+        <span class="at">${esc(ago(n.at))} · ${esc(clock(n.at))}</span>
+      </div>
+      <h3>${esc(n.title)}</h3>
+      ${n.body ? `<p class="body">${esc(n.body)}</p>` : ''}
+      ${n.link ? `<p><a href="${esc(n.link)}" rel="noopener noreferrer nofollow"
+                        target="_blank">More detail</a></p>` : ''}
+    </article>`).join('');
+}
+
+function initNews() {
+  $('#news-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const title = $('#news-title').value.trim();
+    if (!title) return showError('#news-error', 'The update needs a headline.');
+    try {
+      await api('/api/news', {
+        method: 'POST',
+        body: JSON.stringify({
+          title, body: $('#news-body').value.trim(),
+          agency: state.draft.postAgency, category: state.draft.postCategory,
+          area: $('#news-area').value.trim(), link: $('#news-link').value.trim(),
+        }),
+      });
+      $('#news-form').reset();
+      await renderNews();
+    } catch (err) { showError('#news-error', err.message); }
+  });
+}
+
+/* ── help: live data links ─────────────────────────────────────────────── */
+
+const DATA_LINKS = [
+  ['The 74 catalogued WCC datasets, browsable',
+   'https://claudecommunity-nz.github.io/wcc-emergency-gis-data/'],
+  ['Catalogue and SDK source',
+   'https://github.com/claudecommunity-nz/wcc-emergency-gis-data'],
+  ['This module as GeoJSON, for any other map', '/api/geojson'],
+  ['The raw append-only signal log', '/api/signals'],
+  ['Everything on the live map, as one payload', '/api/live'],
+  ['Climate and equity correlation', '/api/adaptation'],
+  ['Baked hazard layers and the street gazetteer', '/api/basemap'],
+  ['Service health', '/api/health'],
+];
+
+function fillHelpLinks() {
+  const list = $('#help-links');
+  if (!list || list.childElementCount) return;
+  for (const [label, href] of DATA_LINKS) {
+    const li = document.createElement('li');
+    const a = document.createElement('a');
+    a.href = href;
+    a.textContent = label;
+    if (href.startsWith('http')) { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+    li.appendChild(a);
+    const code = document.createElement('span');
+    code.className = 'code';
+    code.textContent = ' ' + href;
+    li.appendChild(code);
+    list.appendChild(li);
+  }
 }

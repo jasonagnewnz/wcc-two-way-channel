@@ -722,3 +722,52 @@ footer a { display: inline-flex; align-items: center; min-height: 32px; padding:
   .maphead { flex-wrap: wrap; gap: 4px; }
   .map.tall { aspect-ratio: 1 / 1; }
 }
+.locked { border-left: 3px solid var(--reviewing); }
+.locked .btn { margin-top: 8px; }
+
+/* ── news & help ─────────────────────────────────────────── */
+
+.filters { display: flex; flex-direction: column; gap: 7px; margin-top: 10px; }
+.newsitem {
+  border: 1px solid var(--line); border-left: 3px solid var(--ink-3);
+  border-radius: 9px; padding: 12px 14px; background: var(--card);
+}
+.newsitem.is-urgent { border-left-color: #d64545; background: color-mix(in srgb, #d64545 5%, var(--card)); }
+.newsitem .head { display: flex; flex-wrap: wrap; gap: 7px; align-items: baseline; margin-bottom: 4px; }
+.newsitem h3 { margin: 2px 0 5px; font-size: .98rem; letter-spacing: -.005em; }
+.newsitem .body { font-size: .87rem; color: var(--ink-2); margin: 0; white-space: pre-wrap; }
+.newsitem .src {
+  font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 5px;
+  background: color-mix(in srgb, var(--responding) 14%, transparent); color: var(--responding);
+}
+.newsitem .cat {
+  font-size: .68rem; font-weight: 600; padding: 2px 8px; border-radius: 5px;
+  background: color-mix(in srgb, var(--ink-3) 16%, transparent); color: var(--ink-2);
+}
+.newsitem.is-urgent .cat { background: color-mix(in srgb, #d64545 16%, transparent); color: #d64545; }
+.newsitem a { color: var(--accent); font-size: .84rem; }
+
+.split.help { grid-template-columns: minmax(0, 230px) minmax(0, 1fr); }
+@media (max-width: 900px) { .split.help { grid-template-columns: 1fr; } }
+.helpnav { position: sticky; top: 84px; align-self: start; }
+.helpnav a {
+  display: block; padding: 7px 9px; border-radius: 7px; font-size: .84rem;
+  color: var(--ink-2); text-decoration: none;
+}
+.helpnav a:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--ink); }
+@media (max-width: 900px) { .helpnav { position: static; } }
+
+.helpdoc { max-width: 68ch; }
+.helpdoc .lede { font-size: 1rem; color: var(--ink-2); }
+.helpdoc h2 {
+  font-size: 1.05rem; margin: 26px 0 8px; padding-top: 14px;
+  border-top: 1px solid var(--line); scroll-margin-top: 90px;
+}
+.helpdoc h2:first-of-type { border-top: 0; }
+.helpdoc p, .helpdoc li, .helpdoc dd { font-size: .9rem; color: var(--ink-2); }
+.helpdoc li { margin-bottom: 6px; }
+.helpdoc strong { color: var(--ink); }
+.faq dt { font-weight: 600; color: var(--ink); margin-top: 12px; font-size: .9rem; }
+.faq dd { margin: 4px 0 0; padding-left: 12px; border-left: 2px solid var(--line); }
+.links a { font-size: .87rem; }

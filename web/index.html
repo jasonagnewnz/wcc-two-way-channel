@@ -25,11 +25,13 @@
     <button class="tab is-active" data-view="live" role="tab">Live map</button>
     <button class="tab" data-view="report" role="tab">Report an issue</button>
     <button class="tab" data-view="mine" role="tab">My reports <span class="pill" id="mine-count" hidden></span></button>
+    <button class="tab" data-view="news" role="tab">News</button>
     <button class="tab" data-view="board" role="tab">Message board</button>
     <button class="tab" data-view="ops" role="tab">WCC view</button>
     <button class="tab" data-view="wall" role="tab">Agency wall</button>
     <button class="tab" data-view="community" role="tab">Community map</button>
     <button class="tab" data-view="cards" role="tab">Cards &amp; trust</button>
+    <button class="tab" data-view="help" role="tab">Help &amp; rules</button>
   </nav>
   <div class="whoarea">
     <span class="rolebadge" id="role-badge" hidden></span>
@@ -277,6 +279,228 @@
     <div id="mine-list" class="stack"></div>
   </section>
 
+  <!-- ── News: periodic updates, tagged by agency ───────────── -->
+  <section class="view" id="view-news">
+    <div class="card">
+      <h1>Updates</h1>
+      <p class="hint">
+        Periodic updates from the agencies working the event, newest first.
+        Each one is tagged with who said it and what it is about, so you can
+        filter to the source you trust rather than reading everything.
+      </p>
+      <div class="filters">
+        <div class="chips" id="news-categories"></div>
+        <div class="chips" id="news-agencies"></div>
+      </div>
+    </div>
+
+    <form class="card" id="news-form" hidden>
+      <h2>Post an update</h2>
+      <p class="hint">Published under an agency's name to the whole city.</p>
+      <div class="chips" id="news-post-agency"></div>
+      <div class="chips" id="news-post-category"></div>
+      <input id="news-title" maxlength="200" placeholder="Headline">
+      <textarea id="news-body" rows="3" maxlength="2000" placeholder="What people need to know"></textarea>
+      <div class="row">
+        <input id="news-area" maxlength="120" placeholder="Area (optional)">
+        <input id="news-link" maxlength="500" placeholder="Link (optional)">
+      </div>
+      <button class="btn primary compact" type="submit">Publish update</button>
+      <p class="error" id="news-error" hidden></p>
+    </form>
+
+    <div id="news-list" class="stack"></div>
+  </section>
+
+  <!-- ── Help, guidelines and rules ─────────────────────────── -->
+  <section class="view" id="view-help">
+    <div class="split help">
+      <nav class="card helpnav">
+        <h2>On this page</h2>
+        <a href="#help-start">Getting started</a>
+        <a href="#help-report">Reporting vs asking for help</a>
+        <a href="#help-rules">Community guidelines</a>
+        <a href="#help-mod">How moderation works</a>
+        <a href="#help-privacy">Your privacy</a>
+        <a href="#help-cards">Access cards</a>
+        <a href="#help-faq">Common questions</a>
+        <a href="#help-data">Live data &amp; sources</a>
+      </nav>
+
+      <div class="card helpdoc">
+        <h1>How this works</h1>
+        <p class="lede">
+          A two-way channel between Wellington communities and the Council.
+          You tell WCC what you are seeing; WCC tells you what is happening
+          about it. Everything below is how to use it and what the rules are.
+        </p>
+
+        <h2 id="help-start">Getting started</h2>
+        <p>
+          There is no account and no password. Open the page and you can
+          read everything public and post straight away. If you want your
+          name on your messages, set it under <em>Message board → Posting
+          as</em> — it is only a label, and you can stay anonymous.
+        </p>
+        <ol>
+          <li><strong>Live map</strong> — everything happening right now.
+              Use <em>Near me</em> or type your street to narrow it down.</li>
+          <li><strong>Report an issue</strong> — something is wrong out there.
+              You get a reference code; keep it.</li>
+          <li><strong>My reports</strong> — what happened to what you sent.
+              It updates itself; you never need to ring to ask.</li>
+          <li><strong>Ask for help</strong> — on the Live map, if you or
+              someone near you needs something.</li>
+        </ol>
+
+        <h2 id="help-report">Reporting an issue vs asking for help</h2>
+        <p>
+          These are different and it matters which you use.
+        </p>
+        <ul>
+          <li><strong>Report an issue</strong> — a condition in the world.
+              Water over a road, a slip, a tree down, no power on a street.
+              It goes on the map for everyone.</li>
+          <li><strong>Ask for help</strong> — a person needs something.
+              Getting out, a welfare check, water, medical help. It goes to
+              WCC and responders, and by default <em>only</em> to them.</li>
+        </ul>
+        <p>
+          <strong>Neither is an emergency service.</strong> If someone is in
+          danger right now, call <strong>111</strong>. This is a prototype and
+          nobody is watching it around the clock.
+        </p>
+
+        <h2 id="help-rules">Community guidelines</h2>
+        <p>Short, and all of them are about being useful to a neighbour.</p>
+        <ol>
+          <li><strong>Say what you saw, where.</strong> "Water over the road
+              on Hutt Rd near the onramp, ankle deep" is actionable.
+              "FLOODING!!!" is not, and the form will ask you for more.</li>
+          <li><strong>Do not report what you have not seen.</strong> Passing on
+              a rumour as a sighting sends a crew to the wrong street.</li>
+          <li><strong>Do not post other people's details.</strong> If a
+              message is about an identifiable person — an address, a health
+              condition, a name — mark it <em>Only officials</em>.</li>
+          <li><strong>One message per thing.</strong> Repeating yourself does
+              not make it more urgent; it makes the board harder to read.
+              Several people reporting the <em>same</em> thing is fine and
+              useful — that is corroboration, and it stacks.</li>
+          <li><strong>Keep it civil.</strong> Complaints about the Council are
+              legitimate, but an emergency board during an event is not where
+              they help anyone.</li>
+          <li><strong>Do not impersonate anyone.</strong> Officials are badged
+              with a verified access card. Claiming to be one is the one thing
+              here that could get somebody hurt.</li>
+        </ol>
+
+        <h2 id="help-mod">How moderation works</h2>
+        <p>
+          Photos, offers of help and live feeds from unverified residents wait
+          for a moderator before the public sees them. That is because this
+          map looks like it comes from the Council, and a wrong address for
+          "water here" sends people to the wrong street.
+        </p>
+        <p>
+          <strong>Nothing is ever deleted.</strong> When a moderator withholds
+          a message, it leaves the public feed and a visible marker stays where
+          it was — so a gap in a conversation is always accounted for, and
+          moderation can never look like silent censorship. The original and
+          the reason stay visible to officials.
+        </p>
+        <p>
+          Moderators are either card holders, or people the board has noticed
+          are consistently useful. That second route is scored on countable
+          things — reports the Council acted on, substantive posts, time active
+          — and <em>any</em> message of yours that gets flagged rules you out.
+        </p>
+
+        <h2 id="help-privacy">Your privacy</h2>
+        <ul>
+          <li><strong>Your location stays in your browser.</strong> The
+              <em>Near me</em> filter and the address lookup run on your
+              device against data shipped with the page. Nothing about where
+              you are is sent to us.</li>
+          <li><strong>Photos are stripped.</strong> If a photo carries GPS we
+              use it to place the pin, show you what we read, and then remove
+              all metadata from the copy we publish.</li>
+          <li><strong>Contact details are never public.</strong> A phone
+              number on an offer or a request goes to officials only, even
+              when the rest of the item is public.</li>
+          <li><strong>Requests for help default to private.</strong> You can
+              choose to share one with neighbours — often the fastest
+              responder is two streets away — but you have to choose it.</li>
+        </ul>
+
+        <h2 id="help-cards">Access cards</h2>
+        <p>
+          Officials sign in with a code printed on a card they carry. No email,
+          no text message, no login service — during an emergency those are
+          exactly what fails. Type the code, or tap one in the sign-in dialog.
+        </p>
+        <p>
+          A card only ever grants cards <em>below</em> its own level, so
+          handing one out can never create an equal. Lost a card? Tell whoever
+          issued it and it is cancelled immediately, along with any session
+          opened using it.
+        </p>
+
+        <h2 id="help-faq">Common questions</h2>
+        <dl class="faq">
+          <dt>I reported something. How do I find out what happened?</dt>
+          <dd>Open <strong>My reports</strong>. It updates on its own the
+              moment a staff member changes the status — you do not need to
+              refresh, and you do not need to ring the call centre.</dd>
+
+          <dt>I lost my reference code.</dt>
+          <dd>It is saved on the device you reported from. From another
+              device, paste it into <em>My reports → Have a code from another
+              device</em>. If it is genuinely gone, report the issue again —
+              duplicates are not a problem here, they stack as corroboration.</dd>
+
+          <dt>Why was my message rejected?</dt>
+          <dd>Almost always because it was too short to act on. The form tells
+              you exactly what is missing. It is not a judgement about you —
+              the same rule applies to Council staff.</dd>
+
+          <dt>Someone posted something wrong. What do I do?</dt>
+          <dd>A moderator can withhold it. Post on the same board saying what
+              you know instead — a correction from a neighbour who was there
+              is usually faster and more trusted than moderation.</dd>
+
+          <dt>Can I see what is happening on just my street?</dt>
+          <dd>Yes. <em>Near me</em>, or type your street, then pick a radius
+              from 1 to 20 km. The map draws the radius so you can see what
+              you are excluding.</dd>
+
+          <dt>Does this work if the internet is down?</dt>
+          <dd>Partly, and deliberately. The map and the street index are
+              stored in the page, so it keeps working on a local network with
+              no connection to the outside world. Access cards work the same
+              way. Sending a report still needs to reach the server.</dd>
+
+          <dt>Is this an official Council service?</dt>
+          <dd>No. It is a prototype built in one day at Impact Lab Wellington.
+              In an emergency, call <strong>111</strong>.</dd>
+        </dl>
+
+        <h2 id="help-data">Live data &amp; sources</h2>
+        <p>
+          The map layers come from the datasets Wellington City Council
+          Emergency Management published for this event. They are
+          <strong>hazard-planning data, not live emergency information</strong>.
+        </p>
+        <ul class="links" id="help-links"></ul>
+        <p class="attrib">
+          Data belongs to its publishers — WCC, Greater Wellington, GNS
+          Science, NIWA, Wellington Water, MBIE, NZTA, MetService. Licence
+          terms vary per dataset; check before republishing anything derived
+          from them.
+        </p>
+      </div>
+    </div>
+  </section>
+
   <!-- ── Message board (public) ─────────────────────────────── -->
   <section class="view" id="view-board">
     <div class="split boards">
@@ -318,6 +542,24 @@
 
   <!-- ── Agency wall (officials) ────────────────────────────── -->
   <section class="view" id="view-wall">
+    <div id="wall-locked" class="card locked">
+      <h1>Communications hub</h1>
+      <p class="hint">
+        Eight agency channels on one screen — WCC Emergency Management, WREMO,
+        Wellington Water, FENZ, Police, Greater Wellington, Free Ambulance and
+        Red Cross — plus the important-comms banner that pushes one line to
+        every public screen at once.
+      </p>
+      <p class="hint">
+        <strong>These channels are for agencies talking to each other, so the
+        public are not in them.</strong> Sign in with an access card to open it —
+        the demo cards are published in the repo and listed in the sign-in
+        dialog, one tap.
+      </p>
+      <button class="btn primary compact" id="wall-signin">Sign in with a card</button>
+    </div>
+
+    <div id="wall-panel" hidden>
     <div class="card bannerctl">
       <h1>Important comms</h1>
       <p class="hint">
@@ -341,6 +583,7 @@
     </p>
 
     <div class="wall" id="agency-wall"></div>
+    </div>
   </section>
 
   <!-- ── Community map ──────────────────────────────────────── -->
@@ -482,6 +725,17 @@
 
   <!-- ── WCC ops ────────────────────────────────────────────── -->
   <section class="view" id="view-ops">
+    <div id="ops-locked" class="card locked">
+      <h1>WCC view</h1>
+      <p class="hint">
+        The incoming queue: every report on a map, grouped by proximity, with
+        one-tap statuses that the reporter sees immediately. Needs a card that
+        can set report statuses — hub lead or above.
+      </p>
+      <button class="btn primary compact" id="ops-signin">Sign in with a card</button>
+    </div>
+
+    <div id="ops-panel" hidden>
     <div class="split wide">
       <div class="mapwrap card">
         <div class="maphead">
@@ -499,6 +753,7 @@
         </p>
         <div id="ops-list" class="stack"></div>
       </div>
+    </div>
     </div>
   </section>
 

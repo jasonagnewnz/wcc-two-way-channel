@@ -162,3 +162,63 @@ RESPONSES = [
     (3, "unlikely", "no-eta", "Contractors are committed to road closures tonight. If it's safe to leave the car, "
                               "we'd suggest that — we'll get to this once the weather eases."),
 ]
+
+
+# --- news: periodic agency updates ----------------------------------------
+# (agency, category, title, body, area, link)
+NEWS = [
+    ("wcc-em", "evacuation",
+     "No evacuation is in place for Wellington",
+     "We are aware of rumours about an evacuation of low-lying suburbs. There is no "
+     "evacuation notice in force. If that changes you will hear it here, on the radio, "
+     "and through an emergency mobile alert. Do not act on second-hand information.",
+     "Citywide", None),
+    ("wellington-water", "water",
+     "Boil water notice for part of Tawa",
+     "A pressure loss on the Tawa network means water may not be safe to drink between "
+     "Main Road and the stream. Boil for one minute before drinking, or use bottled. "
+     "We will confirm here when it is lifted.",
+     "Tawa", None),
+    ("wcc-em", "welfare",
+     "Aro Valley and Karori hubs are open",
+     "Both have power, heating and hot drinks. Aro Valley is running on a generator. "
+     "Room for about forty at each. Bring medication and warm clothing if you can.",
+     "Aro Valley, Karori", None),
+    ("metlink", "road",
+     "Johnsonville line delays, buses replacing trains after 6pm",
+     "Surface flooding near the track. Replacement buses from 6pm, expect 20 to 30 "
+     "minutes added to journeys.",
+     "Northern suburbs", None),
+    ("wellington-electricity", "power",
+     "Aro Valley outage — about 400 properties",
+     "Crews are on site. Current estimate for restoration is 9pm and we will update "
+     "here if that changes.",
+     "Aro Valley", None),
+    ("health-nz", "health",
+     "Stay out of floodwater",
+     "Floodwater in Wellington regularly carries wastewater. Do not let children play "
+     "in it, keep cuts covered, and wash thoroughly afterwards. Seek advice if you "
+     "develop diarrhoea or a fever in the next few days.",
+     "Citywide", None),
+    ("wcc-em", "service",
+     "Rubbish and recycling collections suspended tomorrow",
+     "Crews are redirected to the response. Leave bins in until collections resume — "
+     "we will post the catch-up schedule here.",
+     "Citywide", None),
+    ("gwrc", "weather",
+     "Orange heavy rain warning extended to 10pm",
+     "MetService has extended the warning by two hours. Another 30 to 50mm expected. "
+     "River levels at Taita Gorge are rising but remain well inside banks.",
+     "Wellington region", None),
+    ("wcc-em", "recovery",
+     "If your property is damaged, photograph it before you clean up",
+     "Take photos before moving anything — insurers will ask. Keep receipts for "
+     "emergency repairs. We will publish the assistance process here once the "
+     "weather eases.",
+     "Citywide", None),
+    ("nz-police", "general",
+     "Roads are quiet — please keep them that way",
+     "Only travel if you need to. Every car that gets stuck in floodwater ties up a "
+     "crew that is needed somewhere else.",
+     "Citywide", None),
+]

@@ -223,6 +223,11 @@ def _seed_live(store: SignalStore) -> None:
         live.post_update(requests[index]["id"], likelihood=likelihood,
                          timeframe=timeframe, note=note, actor="Duty Controller")
 
+    for agency, category, title, body, area, link in demo_data.NEWS:
+        live.post_news(title=title, body=body, agency=agency, category=category,
+                       area=area, link=link, actor="Duty Controller")
+
+    print(f"  seeded {len(demo_data.NEWS)} news updates")
     print(f"  seeded {len(demo_data.PUBLISHED_ISSUES)} published issues, "
           f"{len(requests)} help requests, {len(demo_data.RESPONSES)} WCC responses")
 

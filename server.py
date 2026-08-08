@@ -43,8 +43,8 @@ from core.community import (
     RESOURCE_TYPE, CommunityService,
 )
 from core.liveops import (
-    ISSUE_STATES, ISSUE_TYPE, LIKELIHOOD, NEED_KINDS, REQUEST_TYPE, TIMEFRAME,
-    URGENCY, LiveOpsService,
+    ISSUE_STATES, ISSUE_TYPE, LIKELIHOOD, NEED_KINDS, NEWS_AGENCIES,
+    NEWS_CATEGORIES, REQUEST_TYPE, TIMEFRAME, URGENCY, LiveOpsService,
 )
 from core.media import read_location
 from core.uploads import BadImage, TooLarge, parse_multipart, resolve, store_image
@@ -232,6 +232,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/live/update":
             return self._post_update(body)
+
+        if path == "/api/news":
+            return self._post_news(body)
 
         match = re.fullmatch(r"/api/reports/([^/]+)/status", path)
         if match:
@@ -446,6 +449,16 @@ class Handler(BaseHTTPRequestHandler):
                     "issue_states": ISSUE_STATES,
                 },
                 "official_view": official,
+            })
+
+        if path == "/api/news":
+            return self._send(200, {
+                "news": self.live.news(
+                    agency=query.get("agency", [None])[0] or None,
+                    category=query.get("category", [None])[0] or None),
+                "agencies": NEWS_AGENCIES,
+                "categories": NEWS_CATEGORIES,
+                "can_post": can(self.role(), "banner.publish"),
             })
 
         if path == "/api/adaptation":
@@ -774,6 +787,27 @@ class Handler(BaseHTTPRequestHandler):
                           if body.get("severity") in SEVERITIES else "moderate"))
         except StoreFull as exc:
             return self._error(503, str(exc))
+        return self._send(201, {"ok": True, "id": item["id"]})
+
+    def _post_news(self, body: dict) -> None:
+        # Publishing under an agency's name is the same authority as pushing
+        # the banner: it speaks for an organisation to the whole city.
+        session = self.require("banner.publish")
+        if session is None:
+            return
+        try:
+            item = self.live.post_news(
+                title=str(body.get("title") or ""),
+                body=str(body.get("body") or ""),
+                agency=str(body.get("agency") or ""),
+                category=str(body.get("category") or "general"),
+                area=(str(body.get("area"))[:120] if body.get("area") else None),
+                link=(str(body.get("link"))[:500] if body.get("link") else None),
+                actor=session["holder"])
+        except StoreFull as exc:
+            return self._error(503, str(exc))
+        except ValueError as exc:
+            return self._error(400, str(exc))
         return self._send(201, {"ok": True, "id": item["id"]})
 
     def _post_update(self, body: dict) -> None:

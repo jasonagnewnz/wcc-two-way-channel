@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from .signals import make_signal
 
+NEWS_TYPE = "news-update"
 REQUEST_TYPE = "help-request"
 ISSUE_TYPE = "published-issue"
 UPDATE_TYPE = "response-update"
@@ -74,6 +75,48 @@ ISSUE_STATES = {
     "monitoring": "Being monitored",
     "resolved": "Resolved",
 }
+
+
+# What a council actually needs to broadcast during an event. Built by asking
+# "what would WCC have to tell people about?" rather than by generalising from
+# what the prototype already had — the gaps were evacuation notices, welfare
+# centre status, public health advisories and the whole recovery phase, none of
+# which a report-and-respond loop covers.
+#
+# EVACUATION is first deliberately. It is the highest-stakes thing a council
+# ever says, and it should never be one of several equal-looking categories in
+# a list.
+NEWS_CATEGORIES = {
+    "evacuation": "Evacuation",
+    "road": "Roads & transport",
+    "water": "Water & wastewater",
+    "power": "Power & utilities",
+    "health": "Public health",
+    "welfare": "Welfare centres & hubs",
+    "service": "Council services",
+    "weather": "Weather",
+    "recovery": "Recovery & assistance",
+    "general": "General update",
+}
+
+# Who can be the named source of an update. Same real agencies as the comms
+# hub, so a reader sees one consistent set of names across the whole product.
+NEWS_AGENCIES = {
+    "wcc-em": "WCC Emergency Management",
+    "wremo": "WREMO",
+    "wellington-water": "Wellington Water",
+    "fenz": "Fire and Emergency NZ",
+    "nz-police": "NZ Police",
+    "gwrc": "Greater Wellington",
+    "wfa": "Wellington Free Ambulance",
+    "red-cross": "NZ Red Cross",
+    "metlink": "Metlink",
+    "wellington-electricity": "Wellington Electricity",
+    "health-nz": "Health New Zealand",
+}
+
+# Categories where being wrong or late is dangerous rather than annoying.
+URGENT_CATEGORIES = ("evacuation", "health", "water")
 
 
 class LiveOpsService:
@@ -189,6 +232,71 @@ class LiveOpsService:
                 "at": signal.get("created_at"),
             })
         return out
+
+    # -- news --------------------------------------------------------------
+
+    def post_news(self, *, title: str, body: str, agency: str, category: str,
+                  actor: str, area: str | None = None, link: str | None = None,
+                  lat: float | None = None, lng: float | None = None) -> dict:
+        """A periodic update from a named agency.
+
+        The agency is recorded as a field rather than baked into the text, so
+        a reader can filter to the source they trust and an after-action review
+        can ask who said what — the same reason the rest of this uses typed
+        signals instead of free text.
+        """
+        if category not in NEWS_CATEGORIES:
+            category = "general"
+        if agency not in NEWS_AGENCIES:
+            raise ValueError(f"unknown agency {agency!r}")
+        title = (title or "").strip()[:200]
+        if not title:
+            raise ValueError("an update needs a headline")
+
+        return self.store.publish(make_signal(
+            module_id=self.module_id,
+            title=title,
+            signal_type=NEWS_TYPE,
+            source_type="official",
+            description=(body or "").strip()[:2000],
+            source=NEWS_AGENCIES[agency],
+            severity="severe" if category in URGENT_CATEGORIES else "moderate",
+            place_name=area,
+            link=link,
+            lat=lat, lng=lng,
+            raw={"agency": agency, "agency_name": NEWS_AGENCIES[agency],
+                 "category": category, "category_label": NEWS_CATEGORIES[category],
+                 "urgent": category in URGENT_CATEGORIES, "actor": actor},
+        ))
+
+    def news(self, *, agency: str | None = None,
+             category: str | None = None, limit: int = 100) -> list[dict]:
+        """Newest first, optionally filtered by who said it or what it is about."""
+        out = []
+        for signal in self.store.fetch(limit=0, signal_type=NEWS_TYPE,
+                                       module_id=self.module_id):
+            raw = signal.get("raw") or {}
+            if agency and raw.get("agency") != agency:
+                continue
+            if category and raw.get("category") != category:
+                continue
+            out.append({
+                "id": signal["id"],
+                "title": signal.get("title"),
+                "body": signal.get("description", ""),
+                "agency": raw.get("agency"),
+                "agency_name": raw.get("agency_name"),
+                "category": raw.get("category"),
+                "category_label": raw.get("category_label"),
+                "urgent": bool(raw.get("urgent")),
+                "area": signal.get("place_name"),
+                "link": signal.get("link"),
+                "lat": signal.get("lat"), "lng": signal.get("lng"),
+                "actor": raw.get("actor"),
+                "at": signal.get("created_at"),
+            })
+        out.reverse()
+        return out[:limit]
 
     # -- reading -----------------------------------------------------------
 
