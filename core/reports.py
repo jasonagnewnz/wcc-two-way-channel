@@ -111,6 +111,7 @@ class ReportService:
                       severity: str = "unknown",
                       media_urls: list[str] | None = None,
                       reporter_kind: str = "resident",
+                      author_id: str | None = None,
                       hazard_context: dict | None = None) -> dict:
         """A resident, community group or Emergency Hub files a report.
 
@@ -136,6 +137,11 @@ class ReportService:
             raw={
                 "issue_type": issue_type,
                 "reporter_kind": reporter_kind,
+                # Who filed it, when we know. This is what lets the trust
+                # score use its strongest input: a report an official thought
+                # worth acting on is corroboration by a human, which no amount
+                # of posting volume can fake.
+                "author_id": author_id,
                 # Everything the prototype inferred rather than was told, kept
                 # in one place and labelled. The interface renders it as
                 # inferred, never as fact — the failure mode these problem

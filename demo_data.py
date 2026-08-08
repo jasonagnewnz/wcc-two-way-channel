@@ -82,6 +82,10 @@ PUBLIC_MESSAGES = [
      "Two cars stopped in the flooded bit. Occupants are out and fine, they're waiting on the verge.", "public"),
     ("ngauranga", "Wellington City Council", "official",
      "Thanks both — contractor is en route, about 25 minutes. Please don't drive into it.", "public"),
+    ("ngauranga", "Priya", "resident",
+     "Contractor's arrived and they've got cones out across the southbound lane now. Traffic is moving again on the other side.", "public"),
+    ("wellington", "Priya", "resident",
+     "For anyone heading through Ngauranga: southbound is coned off but northbound is fine, just slow. The crew were quick.", "public"),
 
     ("wadestown", "Ang", "resident",
      "Slip across the footpath near the shops, people are walking on the road to get past. Kids on the school route in the morning is my worry.", "public"),

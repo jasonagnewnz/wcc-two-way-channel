@@ -422,3 +422,68 @@ legend {
 .wallpane .msg .bubble { font-size: .8rem; padding: 7px 10px; }
 .wallpane .composer { padding-top: 8px; margin-top: 8px; }
 .wallpane .composer textarea { font-size: .8rem; }
+
+/* ── auth cards, roles, trust ────────────────────────────── */
+
+.whoarea { display: flex; align-items: center; gap: 8px; }
+.rolebadge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: .76rem; font-weight: 700; padding: 5px 11px; border-radius: 999px;
+  background: color-mix(in srgb, var(--resolved) 16%, transparent); color: var(--resolved);
+}
+.rolebadge::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+
+dialog {
+  border: 1px solid var(--line); border-radius: var(--radius); padding: 20px;
+  background: var(--card); color: var(--ink); max-width: 420px; width: calc(100% - 32px);
+  box-shadow: 0 20px 60px rgba(0,0,0,.28);
+}
+dialog::backdrop { background: rgba(10,16,26,.55); backdrop-filter: blur(2px); }
+dialog h2 { margin-bottom: .4em; }
+#card-code {
+  font-family: var(--mono); font-size: 1.05rem; letter-spacing: .08em; text-transform: uppercase;
+}
+
+/* the printed card, on screen and on paper */
+.printcard {
+  border: 2px solid var(--ink); border-radius: 10px; padding: 14px 16px;
+  background: var(--card); margin: 12px 0;
+  display: grid; gap: 6px; max-width: 420px;
+}
+.printcard .pc-head {
+  font-size: .66rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ink-2);
+}
+.printcard .pc-code {
+  font-family: var(--mono); font-size: clamp(1.05rem, 4.2vw, 1.5rem); font-weight: 700;
+  letter-spacing: .1em; word-break: break-all;
+}
+.printcard .pc-meta { font-size: .78rem; color: var(--ink-2); }
+.printcard .pc-warn { font-size: .7rem; color: var(--ink-3); }
+
+.cardrow {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px;
+  font-size: .84rem; background: var(--paper);
+}
+.cardrow.is-revoked { opacity: .5; text-decoration-color: var(--ink-3); }
+.cardrow .who { font-weight: 600; flex: 1 1 140px; }
+
+.trustrow {
+  border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px;
+  background: var(--paper);
+}
+.trustrow.is-eligible { border-color: var(--resolved); background: color-mix(in srgb, var(--resolved) 8%, var(--paper)); }
+.trustrow.is-blocked { border-style: dashed; opacity: .75; }
+.trustrow .head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.trustrow .score { font-family: var(--mono); font-weight: 700; font-size: .95rem; }
+.trustrow ul { margin: 6px 0 0; padding-left: 18px; font-size: .78rem; color: var(--ink-2); }
+
+.meter { height: 5px; border-radius: 999px; background: var(--line); overflow: hidden; margin-top: 7px; }
+.meter i { display: block; height: 100%; background: var(--accent); }
+.trustrow.is-eligible .meter i { background: var(--resolved); }
+
+@media print {
+  body > *:not(.printarea) { display: none !important; }
+  .printcard { border-color: #000; box-shadow: none; page-break-inside: avoid; }
+}

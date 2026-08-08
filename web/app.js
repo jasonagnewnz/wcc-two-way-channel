@@ -28,6 +28,9 @@ const state = {
   boardChannel: 'wellington',
   channels: { public: [], agency: [] },
   banner: null,
+  token: null,       // session token from a redeemed card
+  session: null,     // {role, holder, permissions} — decided by the server
+  roles: {},
 };
 
 const MINE_KEY = 'wcc-two-way/my-reports';
@@ -38,14 +41,25 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 // ── api ──────────────────────────────────────────────────────────────────
 
 async function api(path, options) {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
+  const headers = { 'Content-Type': 'application/json' };
+  if (state.token) headers.Authorization = `Bearer ${state.token}`;
+  const res = await fetch(path, { ...options, headers });
   const text = await res.text();
   let body = {};
   try { body = text ? JSON.parse(text) : {}; } catch (_) { /* non-JSON */ }
-  if (!res.ok) throw new Error(body.error || `${res.status} ${res.statusText}`);
+  if (res.status === 401 && state.token && !path.startsWith('/api/auth/')) {
+    // The card was cancelled, or the session expired. Drop it rather than
+    // leaving the interface showing permissions the server no longer honours.
+    saveToken(null);
+    state.session = null;
+    renderWho();
+  }
+  if (!res.ok) {
+    const error = new Error(body.error || `${res.status} ${res.statusText}`);
+    error.status = res.status;
+    error.retryAfter = body.retry_after;
+    throw error;
+  }
   return body;
 }
 
@@ -288,6 +302,7 @@ function showView(name) {
   if (name === 'ops') renderOps();
   if (name === 'board') { renderBoardChannels(); renderBoard(); }
   if (name === 'wall') renderWall();
+  if (name === 'cards') renderCardsView();
 }
 
 // ── report form ──────────────────────────────────────────────────────────
@@ -590,13 +605,14 @@ async function refresh(force = false) {
     const data = await api('/api/reports');
     state.reports = data.reports || [];
     // The wall needs the agency list, which the public viewer never gets.
-    await loadChannels(state.view === 'wall' ? 'official' : 'public');
+    await loadChannels();
     await refreshBanner();
 
     if (state.view === 'ops') renderOps();
     if (state.view === 'mine') renderMine();
     if (state.view === 'board') { renderBoardChannels(); renderBoard(); }
     if (state.view === 'wall') renderWall();
+    if (state.view === 'cards') renderCardsView();
   } catch (_) {
     // Offline or the server restarted. Keep the last good render on screen
     // and try again on the next tick rather than blanking the page.
@@ -608,6 +624,7 @@ async function refresh(force = false) {
 async function boot() {
   loadMine();
   ensureIdentity();
+  loadToken();
   updateMineCount();
 
   $$('.tab').forEach(tab => {
@@ -619,7 +636,10 @@ async function boot() {
   initLookup();
   initBoard();
   initWall();
-  await loadChannels('public');
+  initAuth();
+  initCards();
+  await refreshSession();
+  await loadChannels();
   await refreshBanner();
 
   reportMap = new Map($('#map-report'), state.meta.extent);
@@ -767,8 +787,11 @@ function wireFlagButtons(root) {
 
 // ── public board ─────────────────────────────────────────────────────────
 
-async function loadChannels(viewer) {
-  state.channels = await api(`/api/chat/channels?viewer=${viewer}`);
+/** The server decides which channels come back, from the card on the request.
+ *  There is no viewer parameter any more — there used to be, and anyone could
+ *  set it to "official" and read the inter-agency channels. */
+async function loadChannels() {
+  state.channels = await api('/api/chat/channels');
 }
 
 function renderBoardChannels() {
@@ -844,6 +867,8 @@ function initBoard() {
       $('#board-body').value = '';
       await refresh(true);
     } catch (err) {
+      // 422 is a challenge, not a failure: the message needs more, and the
+      // server said exactly what. Keep what they typed.
       showError('#board-error', err.message);
     }
   });
@@ -863,8 +888,10 @@ async function renderWall() {
   // The wall needs the agency list, and boot only fetches the public one —
   // a public viewer is never given agency channels at all. Load them here
   // rather than depending on a poll having happened to run first.
+  // The server decides whether the agency list comes back at all — it is
+  // keyed on the card, not on what we ask for.
   if (!(state.channels.agency || []).length) {
-    try { await loadChannels('official'); }
+    try { await loadChannels(); }
     catch (_) { /* fall through to the empty state below */ }
   }
   const agencies = state.channels.agency || [];
@@ -878,7 +905,7 @@ async function renderWall() {
     let messages = [];
     try {
       messages = (await api(
-        `/api/chat/messages?channel=${encodeURIComponent(a.id)}&viewer=official`)).messages;
+        `/api/chat/messages?channel=${encodeURIComponent(a.id)}`)).messages;
     } catch (_) { messages = []; }
     return { a, messages };
   }));
@@ -954,4 +981,258 @@ function initWall() {
       await refreshBanner();
     } catch (err) { alert(err.message); }
   });
+}
+
+/* ── auth cards ──────────────────────────────────────────────────────────
+ *
+ * A printed card in a wallet, redeemed for a session. No email, no SMS, no
+ * identity provider — the emergency case is that those are exactly what fails.
+ *
+ * The token is the only thing the client holds. The role attached to it is
+ * decided by the server on every request and is never sent from here: this
+ * file can say who you are, never what you may do.
+ */
+
+const TOKEN_KEY = 'wcc-two-way/card-token';
+
+function loadToken() {
+  try { state.token = localStorage.getItem(TOKEN_KEY) || null; } catch (_) { state.token = null; }
+}
+
+function saveToken(token) {
+  state.token = token;
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch (_) {}
+}
+
+async function refreshSession() {
+  try {
+    const me = await api('/api/auth/me');
+    state.session = me.session;
+    state.roles = me.roles;
+  } catch (_) {
+    state.session = null;
+  }
+  renderWho();
+}
+
+function renderWho() {
+  const badge = $('#role-badge');
+  const signedIn = !!state.session;
+
+  badge.hidden = !signedIn;
+  if (signedIn) {
+    badge.textContent = `${state.roles[state.session.role].label} · ${state.session.holder}`;
+  }
+  $('#signin-btn').hidden = signedIn;
+  $('#signout-btn').hidden = !signedIn;
+
+  // The two official surfaces are hidden rather than merely refused. Showing
+  // a tab that 403s teaches people the app is broken.
+  const canAgency = signedIn && state.session.permissions.includes('post.agency');
+  const canIssue = signedIn && state.session.permissions.includes('card.issue');
+  const wallTab = $('[data-view="wall"]');
+  const opsTab = $('[data-view="ops"]');
+  if (wallTab) wallTab.hidden = !canAgency;
+  if (opsTab) opsTab.hidden = !(signedIn &&
+    state.session.permissions.includes('report.status'));
+  $('#cards-locked').hidden = canIssue;
+  $('#cards-panel').hidden = !canIssue;
+
+  if (!canAgency && state.view === 'wall') showView('board');
+}
+
+function initAuth() {
+  const dialog = $('#signin-dialog');
+  $('#signin-btn').addEventListener('click', () => {
+    $('#card-code').value = '';
+    $('#signin-error').hidden = true;
+    dialog.showModal();
+    $('#card-code').focus();
+  });
+
+  $('#signin-go').addEventListener('click', doSignIn);
+  $('#card-code').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); doSignIn(); }
+  });
+
+  $('#signout-btn').addEventListener('click', async () => {
+    try { await api('/api/auth/signout', { method: 'POST' }); } catch (_) {}
+    saveToken(null);
+    state.session = null;
+    renderWho();
+    showView('report');
+  });
+
+  async function doSignIn() {
+    const code = $('#card-code').value.trim();
+    if (!code) return;
+    try {
+      const result = await api('/api/auth/redeem', {
+        method: 'POST', body: JSON.stringify({ code }),
+      });
+      saveToken(result.token);
+      state.session = result.session;
+      dialog.close();
+      await refreshSession();
+      await refresh(true);
+    } catch (err) {
+      const el = $('#signin-error');
+      el.textContent = err.message;
+      el.hidden = false;
+    }
+  }
+}
+
+// ── issuing, revoking, and the printable card ────────────────────────────
+
+function initCards() {
+  $('#issue-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const holder = $('#issue-holder').value.trim();
+    if (!holder) return showError('#issue-error', 'Who is the card for?');
+    try {
+      const result = await api('/api/auth/issue', {
+        method: 'POST',
+        body: JSON.stringify({
+          role: state.draft.issueRole,
+          holder,
+          note: $('#issue-note').value.trim(),
+        }),
+      });
+      $('#issue-holder').value = '';
+      $('#issue-note').value = '';
+      showIssuedCard(result);
+      await renderCards();
+    } catch (err) {
+      showError('#issue-error', err.message);
+    }
+  });
+
+  $('#trust-run').addEventListener('click', async () => {
+    const btn = $('#trust-run');
+    btn.disabled = true;
+    try {
+      const result = await api('/api/trust/run', { method: 'POST', body: '{}' });
+      $('#trust-summary').textContent = result.count
+        ? `Promoted ${result.count}. Their cards are in the list above.`
+        : 'Nobody new is eligible.';
+      await renderCards();
+      await renderTrust();
+    } catch (err) {
+      $('#trust-summary').textContent = err.message;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
+/** The one and only time the plaintext code exists. Print it or lose it. */
+function showIssuedCard(result) {
+  const card = result.card;
+  const panel = document.createElement('div');
+  panel.className = 'printcard printarea';
+  panel.innerHTML = `
+    <span class="pc-head">Wellington Emergency · Access card</span>
+    <span class="pc-code">${esc(result.code)}</span>
+    <span class="pc-meta"><strong>${esc(card.holder)}</strong> — ${esc(state.roles[card.role].label)}</span>
+    <span class="pc-warn">
+      Keep this in your wallet. Anyone holding it can act as you, so report it lost
+      and it will be cancelled. This code is shown once and cannot be recovered —
+      only its hash is stored.
+    </span>
+    <span class="pc-meta">${esc(card.card_id)}</span>`;
+
+  const actions = document.createElement('div');
+  actions.className = 'row';
+  const print = document.createElement('button');
+  print.className = 'btn ghost compact';
+  print.textContent = 'Print this card';
+  print.addEventListener('click', () => window.print());
+  const done = document.createElement('button');
+  done.className = 'btn ghost compact';
+  done.textContent = 'I have written it down';
+  done.addEventListener('click', () => { panel.remove(); actions.remove(); });
+  actions.append(print, done);
+
+  const form = $('#issue-form');
+  form.parentNode.insertBefore(panel, form.nextSibling);
+  form.parentNode.insertBefore(actions, panel.nextSibling);
+}
+
+async function renderCards() {
+  let cards = [];
+  try { cards = (await api('/api/auth/cards')).cards; } catch (_) { return; }
+
+  $('#cards-list').innerHTML = cards.length ? cards.slice().reverse().map(c => `
+    <div class="cardrow ${c.revoked ? 'is-revoked' : ''}">
+      <span class="who">${esc(c.holder)}</span>
+      <span class="tag t-official">${esc((state.roles[c.role] || {}).label || c.role)}</span>
+      <span class="at">${esc(c.issued_by)} · ${esc(clock(c.issued_at))}</span>
+      ${c.revoked ? '<span class="tag t-flagged">Cancelled</span>'
+                  : `<button class="btn tiny ghost" data-revoke="${esc(c.card_id)}">Cancel</button>`}
+    </div>`).join('') : '<p class="empty">No cards issued yet.</p>';
+
+  $$('[data-revoke]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Cancel this card? Anyone holding it is signed out immediately.')) return;
+      btn.disabled = true;
+      try {
+        await api('/api/auth/revoke', {
+          method: 'POST', body: JSON.stringify({ card_id: btn.dataset.revoke }),
+        });
+        await renderCards();
+      } catch (err) { alert(err.message); btn.disabled = false; }
+    });
+  });
+}
+
+async function renderTrust() {
+  let data;
+  try { data = await api('/api/trust/candidates'); } catch (_) { return; }
+
+  const list = $('#trust-list');
+  if (!data.candidates.length) {
+    list.innerHTML = '<p class="empty">Nobody has posted yet.</p>';
+    return;
+  }
+
+  list.innerHTML = data.candidates.map(c => {
+    const pct = Math.min(100, Math.round((c.score / data.threshold) * 100));
+    const cls = c.blocked_by ? 'is-blocked' : (c.eligible ? 'is-eligible' : '');
+    return `
+      <div class="trustrow ${cls}">
+        <div class="head">
+          <span class="score">${c.score}/${data.threshold}</span>
+          <strong>${esc(c.display_name || c.author_id)}</strong>
+          ${c.eligible ? '<span class="tag t-hub">Eligible</span>' : ''}
+          ${c.blocked_by ? `<span class="tag t-flagged">Ruled out — ${esc(c.blocked_by)}</span>` : ''}
+        </div>
+        <div class="meter"><i style="width:${pct}%"></i></div>
+        ${c.reasons && c.reasons.length ? `<ul>${c.reasons
+          .filter(r => r.points)
+          .map(r => `<li>+${r.points} — ${esc(r.what)}</li>`).join('')}</ul>` : ''}
+      </div>`;
+  }).join('');
+}
+
+async function renderCardsView() {
+  if (!state.session || !state.session.permissions.includes('card.issue')) return;
+
+  // Only the levels this card may actually issue. A hub lead does not need to
+  // discover by rejection that they cannot mint an official.
+  const ceiling = state.roles[state.session.role].max_issue;
+  const allowed = Object.entries(state.roles)
+    .filter(([, r]) => r.rank <= state.roles[ceiling].rank)
+    .sort((a, b) => a[1].rank - b[1].rank)
+    .map(([name]) => name);
+
+  if (!allowed.includes(state.draft.issueRole)) state.draft.issueRole = allowed[allowed.length - 1];
+  chipGroup($('#issue-roles'), allowed, 'issueRole',
+            Object.fromEntries(allowed.map(n => [n, state.roles[n].label])));
+
+  await renderCards();
+  await renderTrust();
 }

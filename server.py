@@ -36,7 +36,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from core.chat import ChatService
+from core.chat import ChatService, channel_kind, redact_for_public
+from core.identity import CardStore, ROLES, can, can_issue, card_event
+from core.moderation import (
+    ContentChallenge, RateLimited, RateLimiter, auto_promote, candidates,
+    challenge, score_author,
+)
 from core.hazard import lookup_async, summary
 from core.reports import ISSUE_TYPES, STATUS_LABELS, STATUSES, ReportService
 from core.signals import SEVERITIES
@@ -60,6 +65,9 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "wcc-two-way/1.1"
     service: ReportService  # injected in serve()
     chat: ChatService       # injected in serve()
+    cards: CardStore        # injected in serve()
+    limiter: RateLimiter    # injected in serve()
+    promoted: dict          # author_id -> role already auto-granted
 
     # -- plumbing ----------------------------------------------------------
 
@@ -99,6 +107,38 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("body must be a JSON object")
         return data
 
+    # -- identity ----------------------------------------------------------
+
+    def session(self) -> dict | None:
+        """Resolve the caller from their bearer token, or None.
+
+        THE role comes from here and nowhere else. It used to arrive in the
+        request body, which meant any caller could post as an agency — the
+        client may say who it *is*, never what it is *allowed to do*.
+        """
+        header = self.headers.get("Authorization") or ""
+        token = header[7:].strip() if header.lower().startswith("bearer ") else None
+        return self.cards.resolve(token)
+
+    def role(self) -> str:
+        session = self.session()
+        return session["role"] if session else "resident"
+
+    def require(self, permission: str) -> dict | None:
+        """Return the session if it carries `permission`, else send 401/403."""
+        session = self.session()
+        if session is None:
+            self._error(401, "this needs a card — redeem yours under 'Sign in with a card'")
+            return None
+        if permission not in session["permissions"]:
+            self._error(403, _article(ROLES[session["role"]]["label"]) + " card cannot do that")
+            return None
+        return session
+
+    def client_key(self) -> str:
+        """Coarse client identifier for redeem throttling only."""
+        return self.client_address[0] if self.client_address else "unknown"
+
     # -- routing -----------------------------------------------------------
 
     def do_OPTIONS(self) -> None:  # noqa: N802
@@ -136,6 +176,24 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/banner":
             return self._post_banner(body)
 
+        if path == "/api/auth/redeem":
+            return self._post_redeem(body)
+
+        if path == "/api/auth/signout":
+            header = self.headers.get("Authorization") or ""
+            if header.lower().startswith("bearer "):
+                self.cards.sign_out(header[7:].strip())
+            return self._send(200, {"ok": True})
+
+        if path == "/api/auth/issue":
+            return self._post_issue(body)
+
+        if path == "/api/auth/revoke":
+            return self._post_revoke(body)
+
+        if path == "/api/trust/run":
+            return self._post_trust_run(body)
+
         match = re.fullmatch(r"/api/reports/([^/]+)/status", path)
         if match:
             return self._post_status(match.group(1), body)
@@ -145,14 +203,50 @@ class Handler(BaseHTTPRequestHandler):
     # -- chat --------------------------------------------------------------
 
     def _post_message(self, body: dict) -> None:
+        session = self.session()
+        role = session["role"] if session else "resident"
+        text = str(body.get("body") or "")
+
+        # An author_id from the client identifies which browser is posting so
+        # it can see its own private messages. It confers nothing. A card
+        # holder is keyed on the card instead, so their standing cannot be
+        # reset by clearing localStorage.
+        author_id = (f"card:{session['card_id']}" if session
+                     else str(body.get("author_id") or "")[:64])
+        if not author_id:
+            return self._error(400, "missing author_id")
+
+        # Card holders post under the name on the card. Everyone else picks
+        # one, which is honest: an unbadged name is not a claim about anybody.
+        author_name = (session["holder"] if session
+                       else str(body.get("author_name") or "Anonymous")[:80])
+
+        # Role is derived, never accepted. Agency posting is gated on the
+        # permission, not on a string in the request body.
+        author_role = "official" if can(role, "post.agency") else (
+            "moderator" if can(role, "moderate.flag") else
+            str(body.get("author_role") or "resident")[:20])
+        if author_role not in ("resident", "hub", "community-group", "moderator", "official"):
+            author_role = "resident"
+
+        try:
+            challenge(text, role=role)
+            self.limiter.check(author_id, role)
+            self.limiter.check_duplicate(author_id, text)
+        except RateLimited as exc:
+            self._send(429, {"error": str(exc), "retry_after": exc.retry_after})
+            return
+        except ContentChallenge as exc:
+            self._send(422, {"error": str(exc), "challenge": True})
+            return
+
         try:
             message = self.chat.post(
                 channel_id=str(body.get("channel_id") or "").strip(),
-                body=str(body.get("body") or ""),
-                author_name=str(body.get("author_name") or "Anonymous")[:80],
-                author_id=str(body.get("author_id") or "")[:64],
-                author_role=("official" if body.get("author_role") == "official"
-                             else str(body.get("author_role") or "resident")[:20]),
+                body=text,
+                author_name=author_name,
+                author_id=author_id,
+                author_role=author_role,
                 agency=(str(body.get("agency"))[:80] if body.get("agency") else None),
                 visibility=str(body.get("visibility") or "public"),
                 reply_to=(str(body.get("reply_to"))[:32] if body.get("reply_to") else None),
@@ -163,14 +257,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(503, str(exc))
         except ValueError as exc:
             return self._error(400, str(exc))
+
+        self.limiter.record(author_id, text)
         return self._send(201, {"ok": True, "id": message["id"]})
 
     def _post_flag(self, body: dict) -> None:
+        session = self.require("moderate.flag")
+        if session is None:
+            return
         try:
             self.chat.flag(
                 str(body.get("message_id") or ""),
                 reason=str(body.get("reason") or "")[:500],
-                actor=str(body.get("actor") or "wcc-staff")[:40],
+                actor=session["holder"],
                 unflag=bool(body.get("unflag")),
             )
         except KeyError:
@@ -182,11 +281,14 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(201, {"ok": True})
 
     def _post_banner(self, body: dict) -> None:
+        session = self.require("banner.publish")
+        if session is None:
+            return
         try:
             self.chat.set_banner(
                 text=str(body.get("text") or ""),
                 level=str(body.get("level") or "warning"),
-                actor=str(body.get("actor") or "wcc-staff")[:40],
+                actor=session["holder"],
                 active=body.get("active", True) is not False,
             )
         except StoreFull as exc:
@@ -227,20 +329,32 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/signals":
             since = _int(query.get("since", ["0"])[0], 0)
             rows = svc.store.fetch(limit=0, since=since)
+            if not can(self.role(), "moderate.flag"):
+                rows = redact_for_public(rows)
             return self._send(200, {"cursor": svc.store.count(), "signals": rows})
 
         if path == "/api/chat/channels":
-            viewer = _viewer(query)
+            # Agency channels appear only for a caller whose card can post in
+            # them. Previously this read ?viewer= straight off the query
+            # string, so anyone could ask for the official view and get it.
+            viewer = "official" if can(self.role(), "post.agency") else "public"
             return self._send(200, self.chat.channels(viewer=viewer))
 
         if path == "/api/chat/messages":
             channel = query.get("channel", [""])[0]
             if not channel:
                 return self._error(400, "channel is required")
+            role = self.role()
+            # Moderators see flags and flagged content; only a card that can
+            # post in an agency channel may read one.
+            if channel_kind(channel) == "agency":
+                viewer = "official" if can(role, "post.agency") else "public"
+            else:
+                viewer = "official" if can(role, "moderate.flag") else "public"
             try:
                 return self._send(200, {"messages": self.chat.messages(
                     channel,
-                    viewer=_viewer(query),
+                    viewer=viewer,
                     author_id=query.get("author_id", [None])[0],
                 )})
             except PermissionError as exc:
@@ -248,6 +362,31 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/banner":
             return self._send(200, {"banner": self.chat.banner()})
+
+        if path == "/api/auth/me":
+            session = self.session()
+            return self._send(200, {
+                "signed_in": session is not None,
+                "session": session,
+                "roles": {name: {"label": r["label"], "rank": r["rank"],
+                                 "permissions": sorted(r["permissions"]),
+                                 "max_issue": r["max_issue"]}
+                          for name, r in ROLES.items()},
+            })
+
+        if path == "/api/auth/cards":
+            if self.require("card.issue") is None:
+                return
+            return self._send(200, {"cards": self.cards.cards()})
+
+        if path == "/api/trust/candidates":
+            if self.require("moderate.flag") is None:
+                return
+            return self._send(200, {
+                "threshold": __import__("core.moderation", fromlist=["THRESHOLD"]).THRESHOLD,
+                "candidates": candidates(self.service.store, self.service.module_id),
+                "promoted": self.promoted,
+            })
 
         if path == "/api/basemap":
             return self._serve_file(WEB / "data" / "basemap.json",
@@ -294,6 +433,9 @@ class Handler(BaseHTTPRequestHandler):
                           if body.get("severity") in SEVERITIES else "unknown"),
                 media_urls=media or None,
                 reporter_kind=str(body.get("reporter_kind") or "resident")[:40],
+                author_id=(f"card:{self.session()['card_id']}" if self.session()
+                           else (str(body.get("author_id"))[:64]
+                                 if body.get("author_id") else None)),
             )
         except StoreFull as exc:
             # 503, not 500: the request was fine, the service is temporarily
@@ -329,10 +471,13 @@ class Handler(BaseHTTPRequestHandler):
         lookup_async(lat, lng, attach)
 
     def _post_status(self, reference: str, body: dict) -> None:
+        session = self.require("report.status")
+        if session is None:
+            return
         reference = reference.upper()
         status = str(body.get("status") or "").strip()
         note = str(body.get("note") or "").strip()[:2000]
-        actor = str(body.get("actor") or "wcc-staff")[:40]
+        actor = session["holder"]
 
         try:
             signal = self.service.set_status(reference, status, note=note, actor=actor)
@@ -344,6 +489,71 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, str(exc))
 
         return self._send(201, {"ok": True, "status": status, "signal": signal})
+
+    # -- auth --------------------------------------------------------------
+
+    def _post_redeem(self, body: dict) -> None:
+        try:
+            token, card = self.cards.redeem(str(body.get("code") or ""),
+                                            client=self.client_key())
+        except PermissionError as exc:
+            return self._error(429, str(exc))
+        except ValueError as exc:
+            # Deliberately the same message for "no such card" and "revoked":
+            # a redeem endpoint should not tell an unknown caller which codes
+            # exist.
+            return self._error(401, str(exc))
+
+        card_event(self.service.store, action="redeemed", card_id=card["card_id"],
+                   role=card["role"], holder=card["holder"], actor=card["holder"],
+                   module_id=self.service.module_id)
+        return self._send(200, {"token": token, "session": self.cards.resolve(token)})
+
+    def _post_issue(self, body: dict) -> None:
+        session = self.require("card.issue")
+        if session is None:
+            return
+        role = str(body.get("role") or "").strip()
+        holder = str(body.get("holder") or "").strip()
+        if not holder:
+            return self._error(400, "who is this card for?")
+        if not can_issue(session["role"], role):
+            return self._error(
+                403, f"{_article(ROLES[session['role']]['label'])} card can issue "
+                     f"up to {ROLES[session['role']]['max_issue']}, not {role!r}")
+
+        code, card = self.cards.issue(role=role, holder=holder,
+                                      issued_by=session["holder"],
+                                      note=str(body.get("note") or "")[:200])
+        card_event(self.service.store, action="issued", card_id=card["card_id"],
+                   role=role, holder=holder, actor=session["holder"],
+                   module_id=self.service.module_id)
+        # The only time the plaintext exists. Print it now or reissue.
+        return self._send(201, {"code": code, "card": {k: v for k, v in card.items()
+                                                        if k != "code_hash"}})
+
+    def _post_revoke(self, body: dict) -> None:
+        session = self.require("card.issue")
+        if session is None:
+            return
+        try:
+            card = self.cards.revoke(str(body.get("card_id") or ""),
+                                     by=session["holder"])
+        except KeyError:
+            return self._error(404, "no card with that id")
+        card_event(self.service.store, action="revoked", card_id=card["card_id"],
+                   role=card["role"], holder=card["holder"], actor=session["holder"],
+                   module_id=self.service.module_id)
+        return self._send(200, {"ok": True})
+
+    def _post_trust_run(self, body: dict) -> None:
+        session = self.require("card.issue")
+        if session is None:
+            return
+        promoted = auto_promote(self.service.store, self.cards,
+                                module_id=self.service.module_id,
+                                granted=self.promoted)
+        return self._send(200, {"promoted": promoted, "count": len(promoted)})
 
     # -- static ------------------------------------------------------------
 
@@ -383,22 +593,16 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
+def _article(label: str) -> str:
+    """'an Official card', not 'a Official card'."""
+    return ("an " if label[:1].lower() in "aeiou" else "a ") + label
+
+
 def _int(value: str, default: int) -> int:
     try:
         return max(0, int(value))
     except (TypeError, ValueError):
         return default
-
-
-def _viewer(query: dict) -> str:
-    """public unless the caller explicitly asks for the official view.
-
-    There is no authentication behind this — a caller can simply say
-    "official". That is a deliberate, documented limitation of the prototype,
-    not an oversight: adding real identity is the first thing this needs
-    before it is anything more than a demo.
-    """
-    return "official" if query.get("viewer", ["public"])[0] == "official" else "public"
 
 
 def _coord(value) -> float | None:
@@ -415,15 +619,20 @@ def serve(host: str = "127.0.0.1", port: int = 8080,
     store = SignalStore(store_path) if store_path else SignalStore()
     service = ReportService(store)
 
+    cards = CardStore()
     handler = type("BoundHandler", (Handler,), {
         "service": service,
         "chat": ChatService(store),
+        "cards": cards,
+        "limiter": RateLimiter(),
+        "promoted": {},
     })
     httpd = ThreadingHTTPServer((host, port), handler)
 
     print(f"\n  Two-way channel running:  http://{host}:{port}")
     print(f"  Signal log:               {store.path}  ({store.count()} signals)")
     print(f"  Shared map reads:         http://{host}:{port}/api/geojson")
+    print(f"  Auth cards:               {cards.path}  ({len(cards.cards())} cards)")
     print("\n  Ctrl-C to stop.\n")
     try:
         httpd.serve_forever()

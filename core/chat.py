@@ -84,6 +84,35 @@ def channel_kind(channel_id: str) -> str:
     return "thread"
 
 
+def redact_for_public(signals: list[dict]) -> list[dict]:
+    """Strip anything a public caller must not see from a raw signal list.
+
+    `/api/signals` exposes the append-only log so other teams' modules can read
+    this one. That endpoint bypasses ChatService.messages() entirely, so
+    without this filter it hands out exactly what the board is careful to
+    withhold: private messages, and the whole of the inter-agency channels.
+
+    Found by asking the public endpoint for the private welfare message and
+    getting it. The lesson generalises — a filter that lives in one read path
+    is not a rule, it is a coincidence. Any new public read path over this log
+    goes through here.
+    """
+    out = []
+    for signal in signals:
+        raw = signal.get("raw") or {}
+        if signal.get("signal_type") == MESSAGE_TYPE:
+            if raw.get("visibility") == OFFICIALS:
+                continue
+            if raw.get("channel_kind") == "agency":
+                continue
+        # Flag signals carry the moderator's reason and name the message they
+        # act on; that is official business, not public reading.
+        if signal.get("signal_type") == FLAG_TYPE:
+            continue
+        out.append(signal)
+    return out
+
+
 class ChatService:
     def __init__(self, store: SignalStore, module_id: str = "team-6-two-way"):
         self.store = store

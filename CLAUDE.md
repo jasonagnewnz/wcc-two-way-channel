@@ -42,6 +42,21 @@ submissions close at 16:00.
   through `esc()`. That is the one genuinely hostile input surface here.
 - **Enrichment must never block or fail a report.** Losing hazard context is
   an inconvenience; losing a report is the thing this exists to prevent.
+- **Permissions are decided by the server, from the card on the request.**
+  The client may say who it is; it may never say what it is allowed to do.
+  `author_role` and `?viewer=official` were both once taken from the client
+  and both were holes. If you add an endpoint, derive the role from
+  `self.session()`.
+- **Enforce at the boundary, not at the renderer.** `/api/signals` leaked
+  private messages for a while because the filter lived in
+  `ChatService.messages()` and that endpoint did not call it. Any new public
+  read path over the log goes through `redact_for_public`.
+- **Card secrets are never signals.** The signal log is served over HTTP.
+  Codes live in `data/cards.jsonl`, hashed, served by nothing. Card *events*
+  go in the log without the code.
+- **Automation may never grant a role that can issue cards.** `auto_promote`
+  asserts this at runtime. If you raise `AUTO_PROMOTE_MAX_ROLE`, you are
+  removing the only thing that stops a heuristic manufacturing officials.
 
 ## Shape
 

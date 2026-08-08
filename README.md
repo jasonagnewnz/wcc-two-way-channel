@@ -123,6 +123,130 @@ agencies are actually in them.
 
 ---
 
+## Access cards
+
+Everything else here runs on possession: a reference code proves you filed a
+report, a browser token shows you your own messages. That is right for the
+public and wrong for officials — without this, anyone could claim the official
+role and put words in an agency's mouth.
+
+An emergency cannot depend on an online identity provider. The network is the
+thing that fails. So: **a printed card in a wallet.**
+
+```bash
+python3 run.py --issue-card coordinator "Duty Coordinator"
+```
+
+```
+  ┌─────────────────────────────────────────────┐
+  │  WELLINGTON EMERGENCY — ACCESS CARD         │
+  ├─────────────────────────────────────────────┤
+  │  WCC-K7M2-QR4X-9BTW-J3ND                    │
+  └─────────────────────────────────────────────┘
+```
+
+WCC prints these and hands them to hub coordinators and staff in advance. On
+the day you type the code. No email, no text message, no SSO round-trip, no
+internet — just this server on whatever network survives.
+
+**Be precise about "offline":** the card removes the dependency on an
+*external* identity provider and works on an isolated local network. The
+client still has to reach this server. A card that verified with no server at
+all would need signed, self-contained credentials and a revocation story,
+which is a different and much larger design.
+
+The code uses the same unambiguous alphabet as the reference codes (no O/0,
+no I/1/L) with a check character, so a typo is rejected *as a typo* rather
+than looked up and reported as an unknown card. 15 characters over a
+31-character alphabet is about 74 bits, and redemption is throttled per
+device on top of that.
+
+### Roles and delegation
+
+| Role | Can |
+|---|---|
+| Resident | post on public boards |
+| Verified resident | as above, higher rate limits |
+| Community moderator | + flag messages |
+| Emergency hub lead | + set report status, issue cards up to moderator |
+| Official | + post in agency channels, publish the banner, issue up to hub-lead |
+| Emergency coordinator | + issue up to official |
+
+**A card can only ever mint a card below its own level.** That is the
+containment property: a leaked card cannot manufacture its own replacement,
+so a chain of delegation strictly loses privilege. It is an explicit
+`max_issue` per role rather than derived arithmetic, because it is the rule
+that stops privilege escalation and should be readable at a glance.
+
+The first card comes from the command line, because permissions delegate
+downward and the root has nothing above it to authorise it. Shell access to
+the server is the right root of trust — whoever has it can already read the
+database.
+
+### What is stored
+
+Card secrets live in `data/cards.jsonl`, which **no endpoint serves**, hashed
+with SHA-256 and never in plaintext. A lost card is reissued, never
+recovered. What goes in the signal log is the *event* — issued, redeemed,
+revoked, promoted, with the card id and role but never the code — so
+delegation stays auditable while the secret stays out of the audit stream.
+
+---
+
+## Spam, thin messages, and earned trust
+
+### The board asks for enough to act on
+
+`help` and `FLOODING!!!` are not reports. A message that is too thin is
+challenged with a specific ask rather than rejected with a shrug:
+
+> We can see it's urgent. Say what you're seeing and where, so someone can act
+> on it — for example "water over the road on Hutt Road near the Ngauranga
+> onramp".
+
+The same rules apply to officials. A one-word message is just as useless
+whoever sends it.
+
+### Rate limits are per author, not per IP
+
+A Community Emergency Hub is one building where forty people share a
+connection. Limiting them as one address would silence a hub during the exact
+event it exists for. Residents get 5/minute and 40/hour; card holders get more
+headroom. Duplicate messages inside ten minutes are refused.
+
+### The board notices who is actually useful
+
+A heuristic — deliberately explainable, no model, no opaque score, just
+countable behaviour a duty officer could check by hand:
+
+| Input | Weight |
+|---|---|
+| A report an official moved past "received" | 15 each, to 30 |
+| Active across several boards | 6 each, to 18 |
+| Substantive messages (80+ characters) | 3 each, to 18 |
+| Messages posted | 2 each, to **12** |
+| Hours active | 2 each, to 20 |
+
+Volume is the smallest input on purpose: **it is the one thing a spammer can
+manufacture**, and it is capped below the threshold so posting a lot is never
+enough on its own. The strongest input is corroboration — a report a human
+official chose to act on. And **any flag against your own messages rules you
+out entirely**, so volume cannot outrun a single moderation event.
+
+Every promotion is written to the log with the score and the reasons that
+caused it, and can be revoked in one click.
+
+### What automation can never do
+
+Automation grants at most a **community moderator** card, and a moderator has
+no `card.issue` permission. So the worst case of a badly tuned heuristic is a
+badly chosen moderator — never a manufactured official, and never a chain of
+them. That ceiling is asserted at runtime as well as documented: `auto_promote`
+refuses to run if the constant is ever edited to something that can mint
+cards.
+
+---
+
 ## It composes
 
 The brief asks for modules that feed one shared common operating picture,
@@ -162,7 +286,14 @@ Each feature carries `reference`, `issue_type`, `severity`, `status`,
 | `GET /api/chat/channels?viewer=` | channel lists (agency channels only for officials) |
 | `GET /api/chat/messages?channel=` | messages, filtered for who is asking |
 | `POST /api/chat/messages` | post to a board or an agency channel |
-| `POST /api/chat/flag` | flag / unflag a message |
+| `POST /api/chat/flag` | flag / unflag a message (needs `moderate.flag`) |
+| `POST /api/auth/redeem` | exchange a printed card code for a session |
+| `GET /api/auth/me` | who the server thinks you are |
+| `POST /api/auth/issue` | mint a card (needs `card.issue`, bounded by `max_issue`) |
+| `POST /api/auth/revoke` | cancel a card and kill its sessions |
+| `GET /api/auth/cards` | issued cards (never their codes) |
+| `GET /api/trust/candidates` | trust scores with their reasons |
+| `POST /api/trust/run` | promote everyone eligible |
 
 ---
 
@@ -220,7 +351,7 @@ enrichment/            prep-kit helpers (two bugs fixed — see below)
 ### Tests
 
 ```bash
-python3 -m unittest discover tests -v      # 46 tests, ~0.6s
+python3 -m unittest discover tests -v      # 88 tests, ~2.4s
 ```
 
 They cover the things that would break the demo or mislead the council, plus
@@ -287,9 +418,16 @@ Roughly in order of demo value.
   Push, or an SMS gateway, closes it properly.
 - **The reporter cannot reply.** Genuinely two-way would let them answer
   "is it still blocked?" — a second signal type chaining to the same report.
-- **Nothing is authenticated.** Anyone who can reach the server can set any
-  status, and anyone can claim the official role on the message board. Fine for
-  a demo room, not for anything further. See below.
+- **Cards are bearer credentials.** Whoever holds the printed card is that
+  person, like a hotel key. That is the deliberate trade for something usable
+  by a stressed volunteer at 3am with no signal — which is why cards are
+  scoped to one role and revocable, and why a lost one should be cancelled
+  immediately.
+- **Sessions live in memory.** Restarting the server signs everyone out. Cards
+  themselves survive; only the sessions do not.
+- **There is no transport security by itself.** A code typed over plain HTTP
+  is readable in transit. The deployed instance is behind TLS; if you run this
+  on a local network, that is a decision to make consciously.
 - **The reporter cannot reply on their own thread yet.** The board covers
   everyone-to-everyone; per-report conversation reuses the same primitive
   (`channel_id` = the reference code) and is the next thing to wire up.

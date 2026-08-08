@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from core.identity import CardStore, ROLES, card_event
 from core.reports import ReportService
 from core.store import SignalStore
 from server import serve
@@ -31,23 +32,28 @@ DEMO_REPORTS = [
     dict(title="Water over the road on Hutt Road",
          description="Southbound lane is under water near the Ngauranga end. Cars turning around.",
          issue_type="flooding", lat=-41.2432, lng=174.8100,
-         place_name="Ngauranga", severity="moderate", reporter_kind="resident"),
+         place_name="Ngauranga", severity="moderate", reporter_kind="resident",
+         author_id="demo-priya"),
     dict(title="Hutt Road flooding getting deeper",
          description="Was ankle deep twenty minutes ago, now over the kerb.",
          issue_type="flooding", lat=-41.2434, lng=174.8112,
-         place_name="Ngauranga", severity="severe", reporter_kind="resident"),
+         place_name="Ngauranga", severity="severe", reporter_kind="resident",
+         author_id="demo-priya"),
     dict(title="Cars stuck in water, Hutt Rd",
          description="Two vehicles stopped in the flooded section. Occupants are out and safe.",
          issue_type="flooding", lat=-41.2430, lng=174.8095,
-         place_name="Ngauranga", severity="severe", reporter_kind="hub"),
+         place_name="Ngauranga", severity="severe", reporter_kind="hub",
+         author_id="demo-dave"),
     dict(title="Slip across the footpath on Wadestown Road",
          description="Mud and small rocks across the whole footpath, pedestrians on the road.",
          issue_type="slip-or-landslide", lat=-41.2660, lng=174.7710,
-         place_name="Wadestown", severity="moderate", reporter_kind="resident"),
+         place_name="Wadestown", severity="moderate", reporter_kind="resident",
+         author_id="demo-ang"),
     dict(title="Power out along Aro Street",
          description="Whole block dark since about twenty past. Hub has opened.",
          issue_type="power-or-water", lat=-41.2950, lng=174.7690,
-         place_name="Aro Valley", severity="moderate", reporter_kind="hub"),
+         place_name="Aro Valley", severity="moderate", reporter_kind="hub",
+         author_id="demo-aro-valley-community-hub"),
     dict(title="Elderly resident needs help getting out",
          description="Ground floor flat taking water, resident uses a walker and cannot manage the step.",
          issue_type="people-need-help", lat=-41.3110, lng=174.7810,
@@ -73,6 +79,12 @@ def seed(store_path: str | None) -> None:
     first = service.reports()[0]["id"]
     service.set_status(first, "reviewing", note="Duty officer checking against the flood layer.")
     service.set_status(first, "responding", note="Contractor dispatched to close the lane.")
+
+    # Advance a few more so the trust score has real corroboration to find:
+    # these reporters had something an official chose to act on.
+    for report in service.reports()[1:5]:
+        service.set_status(report["id"], "reviewing",
+                           note="Checked against the hazard layer.")
     print(f"\n  {first} advanced to 'responding' so the timeline has something in it.")
 
     seed_chat(store)
@@ -108,10 +120,47 @@ def seed_chat(store: SignalStore) -> None:
         chat.flag(last_newtown, reason=demo_data.FLAG_LAST_NEWTOWN_REASON,
                   actor="wcc-moderator")
 
+    _seed_bootstrap_card(store)
+
     agency_count = len(demo_data.AGENCY_MESSAGES)
     public_count = len(demo_data.PUBLIC_MESSAGES)
     print(f"  seeded message board: {agency_count} agency + {public_count} public "
           f"messages, 1 banner, 1 flagged message\n")
+
+
+def issue_card(role: str, holder: str, store_path: str | None) -> int:
+    """Mint a card from the command line.
+
+    This is the bootstrap. Permissions are delegated downward from a card, so
+    the first one has to come from somewhere with no card to authorise it —
+    which means shell access to the server. That is the right root of trust:
+    whoever can run this can already read the database.
+    """
+    if role not in ROLES:
+        print(f"  Unknown role {role!r}. Choose from: {', '.join(ROLES)}")
+        return 1
+
+    store = SignalStore(store_path) if store_path else SignalStore()
+    cards = CardStore()
+    code, card = cards.issue(role=role, holder=holder, issued_by="console",
+                             note="Issued from the command line.")
+    card_event(store, action="issued", card_id=card["card_id"], role=role,
+               holder=holder, actor="console")
+
+    print()
+    print("  ┌─────────────────────────────────────────────┐")
+    print("  │  WELLINGTON EMERGENCY — ACCESS CARD         │")
+    print("  ├─────────────────────────────────────────────┤")
+    print(f"  │  {code:<41} │")
+    print("  ├─────────────────────────────────────────────┤")
+    print(f"  │  {ROLES[role]['label']:<20} {holder[:20]:<20} │")
+    print("  └─────────────────────────────────────────────┘")
+    print()
+    print("  Write it down now. It is not stored and cannot be shown again —")
+    print("  only its hash is kept, so a lost card is reissued, never recovered.")
+    print(f"  Card id {card['card_id']} (use this to revoke it).")
+    print()
+    return 0
 
 
 def reset(store_path: str | None, *, assume_yes: bool = False) -> int:
@@ -139,6 +188,28 @@ def reset(store_path: str | None, *, assume_yes: bool = False) -> int:
     return 0
 
 
+def _seed_bootstrap_card(store: SignalStore) -> None:
+    """Mint one coordinator card so a fresh clone can demo the official side.
+
+    Printed to the console only. On a public deployment this is the card that
+    matters most — anyone reading the startup logs holds the top role — so it
+    is minted once and never reprinted.
+    """
+    cards = CardStore()
+    if any(c["role"] == "coordinator" for c in cards.cards()):
+        return
+    code, card = cards.issue(role="coordinator", holder="Duty Coordinator",
+                             issued_by="seed", note="Seeded for the demo.")
+    card_event(store, action="issued", card_id=card["card_id"], role="coordinator",
+               holder="Duty Coordinator", actor="seed")
+    print()
+    print("  ╔══════════════════════════════════════════════════╗")
+    print("  ║  DEMO COORDINATOR CARD — write this down          ║")
+    print(f"  ║  {code:<48}║")
+    print("  ╚══════════════════════════════════════════════════╝")
+    print("  Sign in with it under 'Sign in with a card'. Shown once only.")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="WCC two-way community channel")
     parser.add_argument("--host", default="127.0.0.1",
@@ -152,9 +223,15 @@ def main(argv: list[str] | None = None) -> int:
                         help="add demo reports and exit without serving")
     parser.add_argument("--reset", action="store_true",
                         help="DELETE every signal, then exit. Use before a demo.")
+    parser.add_argument("--issue-card", nargs=2, metavar=("ROLE", "HOLDER"),
+                        help="mint an auth card and print it, then exit "
+                             f"(roles: {', '.join(ROLES)})")
     parser.add_argument("--yes", action="store_true",
                         help="skip the confirmation prompt on --reset")
     args = parser.parse_args(argv)
+
+    if args.issue_card:
+        return issue_card(args.issue_card[0], args.issue_card[1], args.store)
 
     if args.reset:
         return reset(args.store, assume_yes=args.yes)

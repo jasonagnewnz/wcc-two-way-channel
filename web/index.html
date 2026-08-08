@@ -27,8 +27,37 @@
     <button class="tab" data-view="board" role="tab">Message board</button>
     <button class="tab" data-view="ops" role="tab">WCC view</button>
     <button class="tab" data-view="wall" role="tab">Agency wall</button>
+    <button class="tab" data-view="cards" role="tab">Cards &amp; trust</button>
   </nav>
+  <div class="whoarea">
+    <span class="rolebadge" id="role-badge" hidden></span>
+    <button class="btn ghost compact" id="signin-btn">Sign in with a card</button>
+    <button class="btn ghost compact" id="signout-btn" hidden>Sign out</button>
+  </div>
 </header>
+
+<!-- Redeem a printed card. No password, no email: the code on the card is the
+     whole credential, which is what makes it work with no connectivity to an
+     identity provider. -->
+<dialog id="signin-dialog">
+  <form method="dialog" id="signin-form">
+    <h2>Sign in with your card</h2>
+    <p class="hint">
+      Type the code printed on your access card. It works with no email, no
+      text message and no internet — only this server.
+    </p>
+    <label>
+      <span>Card code</span>
+      <input id="card-code" placeholder="WCC-XXXX-XXXX-XXXX" maxlength="24"
+             autocomplete="off" spellcheck="false">
+    </label>
+    <p class="error" id="signin-error" hidden></p>
+    <div class="row" style="justify-content:flex-end">
+      <button class="btn ghost compact" value="cancel" type="submit">Cancel</button>
+      <button class="btn primary compact" id="signin-go" type="button">Sign in</button>
+    </div>
+  </form>
+</dialog>
 
 <!-- Important comms banner. Officials publish one line; it appears at the top
      of every surface at once. Hidden until there is one. -->
@@ -212,6 +241,69 @@
     </p>
 
     <div class="wall" id="agency-wall"></div>
+  </section>
+
+  <!-- ── Cards & trust (card holders only) ──────────────────── -->
+  <section class="view" id="view-cards">
+    <div id="cards-locked" class="card">
+      <h1>Cards &amp; trust</h1>
+      <p class="hint">
+        This is for card holders. Sign in with the code on your access card to
+        issue cards, revoke them, and see who the board thinks has earned
+        moderation.
+      </p>
+    </div>
+
+    <div id="cards-panel" hidden>
+      <div class="split boards">
+        <div class="card">
+          <h1>Issue a card</h1>
+          <p class="hint">
+            Hand the printed card over in person. Whoever holds it is that
+            person, so treat it like a key — and revoke it the moment it goes
+            missing.
+          </p>
+          <form id="issue-form">
+            <label>
+              <span>Who is it for</span>
+              <input id="issue-holder" maxlength="80" placeholder="Name or role, e.g. Aro Valley hub lead">
+            </label>
+            <fieldset>
+              <legend>Permission level</legend>
+              <div class="chips" id="issue-roles"></div>
+            </fieldset>
+            <label>
+              <span>Note <em>optional</em></span>
+              <input id="issue-note" maxlength="200" placeholder="Why this card exists">
+            </label>
+            <button class="btn primary" type="submit">Issue card</button>
+            <p class="error" id="issue-error" hidden></p>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2>Issued cards</h2>
+          <p class="hint">Codes are never shown again — only their hashes are kept.</p>
+          <div id="cards-list" class="stack"></div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <h2>Earned trust</h2>
+        <p class="hint">
+          Who the board thinks is worth moderation, scored on countable
+          behaviour. Any message of theirs that has been flagged rules them out
+          entirely. Automation can grant a community moderator card and nothing
+          higher — a moderator cannot issue cards, so the bot can never
+          manufacture an official.
+        </p>
+        <div class="row">
+          <button class="btn primary compact" id="trust-run">Promote everyone eligible</button>
+          <span class="at" id="trust-summary"></span>
+        </div>
+        <div id="trust-list" class="stack"></div>
+      </div>
+    </div>
   </section>
 
   <!-- ── WCC ops ────────────────────────────────────────────── -->
