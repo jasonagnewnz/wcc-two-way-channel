@@ -29,6 +29,8 @@ const state = {
   channels: { public: [], agency: [] },
   banner: null,
   near: null,        // {lat,lng,radius,label} — this browser only, never sent
+  community: null,
+  queue: null,
   token: null,       // session token from a redeemed card
   session: null,     // {role, holder, permissions} — decided by the server
   roles: {},
@@ -304,6 +306,7 @@ function showView(name) {
   if (name === 'board') { renderBoardChannels(); renderBoard(); }
   if (name === 'wall') renderWall();
   if (name === 'cards') renderCardsView();
+  if (name === 'community') renderCommunity().then(fillCommunityChips);
 }
 
 // ── report form ──────────────────────────────────────────────────────────
@@ -618,6 +621,7 @@ async function refresh(force = false) {
     if (state.view === 'board') { renderBoardChannels(); renderBoard(); }
     if (state.view === 'wall') renderWall();
     if (state.view === 'cards') renderCardsView();
+    if (state.view === 'community') renderCommunity();
   } catch (_) {
     // Offline or the server restarted. Keep the last good render on screen
     // and try again on the next tick rather than blanking the page.
@@ -643,6 +647,7 @@ async function boot() {
   initBoard();
   initWall();
   initNear();
+  initCommunity();
   initAuth();
   initCards();
   await refreshSession();
@@ -1509,4 +1514,266 @@ function drawNearRing(map) {
   dot.setAttribute('r', '4');
   dot.setAttribute('class', 'near-dot');
   layer.append(ring, dot);
+}
+
+/* ── community map ───────────────────────────────────────────────────────
+ *
+ * Photos, offers of help, and live feeds. Everything from an unverified
+ * resident waits for a moderator; card holders skip the queue because a human
+ * already vouched for them.
+ *
+ * Stacks, not clusters: five photos of one flooded road are five witnesses,
+ * and the count is the most useful number on the screen.
+ */
+
+let communityMap = null;
+
+async function loadCommunity() {
+  const params = new URLSearchParams({ author_id: state.authorId });
+  state.community = await api('/api/community?' + params);
+  if (state.session && state.session.permissions.includes('moderate.flag')) {
+    try { state.queue = (await api('/api/community/queue')).queue; } catch (_) { state.queue = []; }
+  } else {
+    state.queue = null;
+  }
+}
+
+async function renderCommunity() {
+  try { await loadCommunity(); } catch (_) { return; }
+  const c = state.community || {};
+
+  if (!communityMap) {
+    communityMap = new Map($('#map-community'), state.meta.extent);
+    if (state.basemap) communityMap.drawBasemap(state.basemap);
+    communityMap.svg.addEventListener('click', event => {
+      const point = communityMap.latlng(event.clientX, event.clientY);
+      if (point) {
+        state.draft.communityPoint = point;
+        $('#exif-readout').hidden = false;
+        $('#exif-readout').className = 'exifreadout';
+        $('#exif-readout').textContent =
+          `Pin set by hand: ${point.lat.toFixed(4)}, ${point.lng.toFixed(4)}`;
+      }
+    });
+  }
+  drawNearRing(communityMap);
+  drawCommunityPins(c);
+
+  const stacks = (c.stacks || []).filter(withinNear);
+  $('#community-counter').textContent =
+    `${stacks.length} location${stacks.length === 1 ? '' : 's'} · ` +
+    `${(c.resources || []).length} offers · ${(c.feeds || []).length} feeds`;
+
+  renderStacks(stacks);
+  renderQueue();
+}
+
+function drawCommunityPins(c) {
+  const layer = communityMap.layers.pins;
+  layer.textContent = '';
+
+  const add = (item, cls, radius, label) => {
+    if (item.lat == null || item.lng == null) return;
+    const el = document.createElementNS(SVG_NS, 'circle');
+    el.setAttribute('cx', communityMap.x(item.lng).toFixed(1));
+    el.setAttribute('cy', communityMap.y(item.lat).toFixed(1));
+    el.setAttribute('r', String(radius));
+    el.setAttribute('class', cls + (withinNear(item) ? '' : ' is-far'));
+    const t = document.createElementNS(SVG_NS, 'title');
+    t.textContent = label;
+    el.appendChild(t);
+    layer.appendChild(el);
+  };
+
+  // Stacks first and largest — the radius grows with corroboration, so a
+  // street five people have photographed is visibly louder than one.
+  for (const stack of (c.stacks || [])) {
+    add(stack, 'stackpin', Math.min(6 + stack.pieces * 3, 22),
+        `${stack.title} — ${stack.pieces} piece(s) of evidence from ${stack.witnesses} source(s)`);
+  }
+  for (const r of (c.resources || [])) {
+    add(r, 'res', 5, `${r.title}${r.state !== 'approved' ? ' (awaiting a moderator)' : ''}`);
+  }
+  for (const f of (c.feeds || [])) {
+    add(f, 'feedpin', 5, `${f.title} — live feed`);
+  }
+}
+
+function renderStacks(stacks) {
+  const list = $('#stack-list');
+  if (!stacks.length) {
+    list.innerHTML = '<p class="empty">Nothing on the map yet in this area.</p>';
+    return;
+  }
+  list.innerHTML = stacks.map(s => `
+    <article class="stackcard ${s.pieces > 2 ? 'is-strong' : ''}">
+      <div class="head">
+        <span class="strength">${s.pieces} piece${s.pieces === 1 ? '' : 's'} of evidence</span>
+        <strong>${esc(s.title || 'Unnamed location')}</strong>
+        <span class="at">${s.reports} report${s.reports === 1 ? '' : 's'} ·
+          ${s.photos} photo${s.photos === 1 ? '' : 's'} ·
+          ${s.witnesses} source${s.witnesses === 1 ? '' : 's'}</span>
+      </div>
+      ${s.images && s.images.length ? `<div class="thumbs">${s.images
+        .map(u => `<img src="${esc(u)}" alt="Photo" title="Submitted by a resident" loading="lazy">`)
+        .join('')}</div>` : ''}
+    </article>`).join('');
+}
+
+function renderQueue() {
+  const wrap = $('#mod-queue-wrap');
+  if (!state.queue) { wrap.hidden = true; return; }
+  wrap.hidden = false;
+  $('#queue-count').textContent = state.queue.length;
+
+  const list = $('#mod-queue');
+  if (!state.queue.length) {
+    list.innerHTML = '<p class="empty">Nothing waiting.</p>';
+    return;
+  }
+  list.innerHTML = state.queue.map(i => `
+    <div class="modrow">
+      <div class="head">
+        <strong>${esc(i.title || '(untitled)')}</strong>
+        <span class="at">${esc(i.author_name)} · ${esc(clock(i.at))}</span>
+      </div>
+      ${i.detail ? `<p class="body">${esc(i.detail)}</p>` : ''}
+      ${i.media_urls && i.media_urls.length
+        ? `<img src="${esc(i.media_urls[0])}" alt="Photo" title="Awaiting review">` : ''}
+      ${i.url ? `<p class="code">${esc(i.url)}</p>` : ''}
+      ${i.contact ? `<p class="at">Contact: ${esc(i.contact)}</p>` : ''}
+      ${i.located_by ? `<p class="at">Located by ${esc(i.located_by)}</p>` : ''}
+      <div class="row">
+        <button class="btn tiny" data-approve="${esc(i.id)}">Approve</button>
+        <button class="btn tiny ghost" data-reject="${esc(i.id)}">Decline</button>
+      </div>
+    </div>`).join('');
+
+  $$('[data-approve]').forEach(b => b.addEventListener('click',
+    () => decide(b.dataset.approve, 'approved', b)));
+  $$('[data-reject]').forEach(b => b.addEventListener('click',
+    () => decide(b.dataset.reject, 'rejected', b)));
+}
+
+async function decide(itemId, newState, btn) {
+  btn.disabled = true;
+  try {
+    await api('/api/community/moderate', {
+      method: 'POST',
+      body: JSON.stringify({ item_id: itemId, state: newState }),
+    });
+    await renderCommunity();
+  } catch (err) { alert(err.message); btn.disabled = false; }
+}
+
+function initCommunity() {
+  const kinds = () => (state.community && state.community.resource_kinds) || {};
+  state.draft.resourceKind = 'water';
+  state.draft.resourceVisibility = 'public';
+  state.draft.feedKind = 'camera';
+
+  // Reading the file locally first means the uploader is told what the photo
+  // gives away BEFORE it is sent anywhere.
+  $('#evidence-file').addEventListener('change', () => {
+    const readout = $('#exif-readout');
+    readout.hidden = false;
+    readout.className = 'exifreadout none';
+    readout.textContent = 'Reading the photo…';
+  });
+
+  $('#evidence-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const file = $('#evidence-file').files[0];
+    if (!file) return showError('#evidence-error', 'Choose a photo first.');
+
+    const form = new FormData();
+    form.append('image', file);
+    form.append('caption', $('#evidence-caption').value.trim());
+    form.append('author_id', state.authorId);
+    form.append('author_name', state.displayName || 'Anonymous');
+    if (state.draft.communityPoint) {
+      form.append('lat', state.draft.communityPoint.lat);
+      form.append('lng', state.draft.communityPoint.lng);
+    }
+
+    try {
+      const res = await fetch('/api/community/evidence', {
+        method: 'POST',
+        headers: state.token ? { Authorization: `Bearer ${state.token}` } : {},
+        body: form,   // no Content-Type: the browser sets the boundary
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || 'upload failed');
+
+      const readout = $('#exif-readout');
+      readout.hidden = false;
+      readout.className = 'exifreadout' + (result.found_location ? '' : ' none');
+      readout.textContent = result.found_location
+        ? `The photo knew where it was: ${result.lat.toFixed(4)}, ${result.lng.toFixed(4)} — pin placed for you. `
+          + (result.metadata_stripped ? 'Its metadata has been removed from the published copy.' : '')
+        : 'No location in this photo — tap the map to place it. '
+          + (result.metadata_stripped ? 'Its metadata has been removed anyway.' : '');
+
+      $('#evidence-form').reset();
+      state.draft.communityPoint = null;
+      await renderCommunity();
+    } catch (err) {
+      showError('#evidence-error', err.message);
+    }
+  });
+
+  $('#resource-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const detail = $('#resource-detail').value.trim();
+    if (!detail) return showError('#resource-error', 'Say what you can offer.');
+    const point = state.draft.communityPoint || state.near;
+    try {
+      await api('/api/community/resource', {
+        method: 'POST',
+        body: JSON.stringify({
+          kind: state.draft.resourceKind, detail,
+          place_name: $('#resource-place').value.trim(),
+          contact: $('#resource-contact').value.trim(),
+          visibility: state.draft.resourceVisibility,
+          author_id: state.authorId,
+          author_name: state.displayName || 'Anonymous',
+          lat: point ? point.lat : null, lng: point ? point.lng : null,
+        }),
+      });
+      $('#resource-form').reset();
+      await renderCommunity();
+    } catch (err) { showError('#resource-error', err.message); }
+  });
+
+  $('#feed-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const url = $('#feed-url').value.trim();
+    if (!url) return showError('#feed-error', 'Paste the link.');
+    const point = state.draft.communityPoint || state.near;
+    try {
+      await api('/api/community/feed', {
+        method: 'POST',
+        body: JSON.stringify({
+          url, kind: state.draft.feedKind,
+          label: $('#feed-label').value.trim(),
+          author_id: state.authorId,
+          author_name: state.displayName || 'Anonymous',
+          lat: point ? point.lat : null, lng: point ? point.lng : null,
+        }),
+      });
+      $('#feed-form').reset();
+      await renderCommunity();
+    } catch (err) { showError('#feed-error', err.message); }
+  });
+}
+
+function fillCommunityChips() {
+  const c = state.community || {};
+  chipGroup($('#resource-kinds'), Object.keys(c.resource_kinds || {}),
+            'resourceKind', c.resource_kinds || {});
+  chipGroup($('#feed-kinds'), Object.keys(c.feed_kinds || {}),
+            'feedKind', c.feed_kinds || {});
+  chipGroup($('#resource-visibility'), ['public', 'officials'], 'resourceVisibility', {
+    public: 'Anyone can see this', officials: 'Only officials (address, contact)',
+  });
 }

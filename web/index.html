@@ -27,6 +27,7 @@
     <button class="tab" data-view="board" role="tab">Message board</button>
     <button class="tab" data-view="ops" role="tab">WCC view</button>
     <button class="tab" data-view="wall" role="tab">Agency wall</button>
+    <button class="tab" data-view="community" role="tab">Community map</button>
     <button class="tab" data-view="cards" role="tab">Cards &amp; trust</button>
   </nav>
   <div class="whoarea">
@@ -266,6 +267,80 @@
     </p>
 
     <div class="wall" id="agency-wall"></div>
+  </section>
+
+  <!-- ── Community map ──────────────────────────────────────── -->
+  <section class="view" id="view-community">
+    <div class="split wide">
+      <div class="mapwrap card">
+        <div class="maphead">
+          <h2>Community map</h2>
+          <span class="counter" id="community-counter"></span>
+        </div>
+        <div id="map-community" class="map"></div>
+        <p class="attrib">
+          Photos, offers of help and live feeds, added by people here and checked
+          before they appear. Bigger circles mean more people saw the same thing.
+        </p>
+      </div>
+
+      <div class="card scroller">
+        <div id="mod-queue-wrap" hidden>
+          <h2>Waiting for you <span class="pill" id="queue-count">0</span></h2>
+          <p class="hint">
+            Nothing here is public yet. Approving puts it on the map; declining
+            leaves it visible to its author and to you, never deleted.
+          </p>
+          <div id="mod-queue" class="stack"></div>
+          <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
+        </div>
+
+        <h2>Add to the map</h2>
+
+        <form id="evidence-form" class="community-form">
+          <h3>A photo</h3>
+          <p class="hint" id="exif-hint">
+            If the photo still has its location, the pin places itself. We read it,
+            show you, then strip the metadata from the copy we publish.
+          </p>
+          <input type="file" id="evidence-file" accept="image/jpeg,image/png">
+          <input id="evidence-caption" maxlength="200" placeholder="What does it show?">
+          <p class="exifreadout" id="exif-readout" hidden></p>
+          <button class="btn primary compact" type="submit">Add photo</button>
+          <p class="error" id="evidence-error" hidden></p>
+        </form>
+
+        <form id="resource-form" class="community-form">
+          <h3>Something you can offer</h3>
+          <div class="chips" id="resource-kinds"></div>
+          <input id="resource-detail" maxlength="200" placeholder="e.g. Tap water, bring a container">
+          <input id="resource-place" maxlength="120" placeholder="Street or suburb">
+          <input id="resource-contact" maxlength="120" placeholder="How to reach you (optional)">
+          <div class="chips" id="resource-visibility"></div>
+          <button class="btn primary compact" type="submit">Offer this</button>
+          <p class="error" id="resource-error" hidden></p>
+        </form>
+
+        <form id="feed-form" class="community-form">
+          <h3>A live feed</h3>
+          <p class="hint">A camera, a stream or a status page. A moderator checks it first.</p>
+          <div class="chips" id="feed-kinds"></div>
+          <input id="feed-label" maxlength="120" placeholder="What is it?">
+          <input id="feed-url" type="url" maxlength="500" placeholder="https://...">
+          <button class="btn primary compact" type="submit">Suggest feed</button>
+          <p class="error" id="feed-error" hidden></p>
+        </form>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h2>What people are showing</h2>
+      <p class="hint">
+        Reports and photos of the same thing are stacked together, not merged.
+        Five photos of one flooded road is five witnesses — the count is the point.
+      </p>
+      <div id="stack-list" class="stack"></div>
+    </div>
   </section>
 
   <!-- ── Cards & trust (card holders only) ──────────────────── -->

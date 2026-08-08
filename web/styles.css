@@ -507,3 +507,48 @@ dialog h2 { margin-bottom: .4em; }
 .hub.is-far { opacity: .12; }
 .near-ring { fill: color-mix(in srgb, var(--accent) 7%, transparent); stroke: var(--accent); stroke-width: 1.2; stroke-dasharray: 6 4; }
 .near-dot { fill: var(--accent); stroke: var(--card); stroke-width: 2; }
+
+
+/* ── community map ───────────────────────────────────────── */
+
+.community-form { border-top: 1px dashed var(--line); padding-top: 12px; margin-top: 12px; }
+.community-form h3 { margin: 0 0 6px; font-size: .9rem; }
+.community-form input { margin-bottom: 7px; }
+.community-form .chips { margin-bottom: 8px; }
+.exifreadout {
+  font-size: .78rem; padding: 8px 10px; border-radius: 8px; margin: 0 0 8px;
+  background: color-mix(in srgb, var(--resolved) 10%, var(--paper));
+  border: 1px solid color-mix(in srgb, var(--resolved) 30%, transparent);
+  color: var(--ink-2);
+}
+.exifreadout.none {
+  background: var(--paper); border-color: var(--line); color: var(--ink-3);
+}
+
+.stackcard {
+  border: 1px solid var(--line); border-radius: 9px; padding: 11px 13px;
+  background: var(--paper);
+}
+.stackcard.is-strong { border-color: var(--accent); border-left-width: 3px; }
+.stackcard .head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.stackcard .strength {
+  font-weight: 700; font-size: .82rem; color: var(--accent);
+}
+.thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.thumbs img {
+  width: 84px; height: 62px; object-fit: cover; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--paper);
+  /* A photo that fails to decode should look like an empty tile, not like
+     broken alt text spilling out of the card. */
+  overflow: hidden; font-size: .6rem; color: var(--ink-3);
+}
+
+.modrow {
+  border: 1px solid var(--reviewing); border-radius: 9px; padding: 10px 12px;
+  background: color-mix(in srgb, var(--reviewing) 8%, var(--card));
+}
+.modrow img { max-width: 100%; border-radius: 6px; margin: 6px 0; }
+
+.res { fill: var(--resolved); stroke: var(--card); stroke-width: 1.4; }
+.feedpin { fill: #7a4bd0; stroke: var(--card); stroke-width: 1.4; }
+.stackpin { fill: var(--accent); fill-opacity: .55; stroke: var(--accent); stroke-width: 1.5; }

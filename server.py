@@ -37,6 +37,12 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from core.chat import ChatService, channel_kind, redact_for_public
+from core.community import (
+    APPROVED, EVIDENCE_TYPE, FEED_KINDS, FEED_TYPE, PENDING, RESOURCE_KINDS,
+    RESOURCE_TYPE, CommunityService,
+)
+from core.media import read_location
+from core.uploads import BadImage, TooLarge, parse_multipart, resolve, store_image
 from core.identity import CardStore, ROLES, can, can_issue, card_event
 from core.moderation import (
     ContentChallenge, RateLimited, RateLimiter, auto_promote, candidates,
@@ -57,6 +63,9 @@ WELLINGTON = (174.62, -41.36, 174.94, -41.14)
 # larger is a mistake or an attack; either way we are not reading it into
 # memory.
 MAX_BODY_BYTES = 64 * 1024
+# Bigger for photos, still bounded, and checked from Content-Length before the
+# body is read rather than after.
+MAX_UPLOAD_BYTES = 9 * 1024 * 1024
 
 _REF_RE = re.compile(r"^WLG-[A-Z2-9]{5}$")
 
@@ -66,6 +75,7 @@ class Handler(BaseHTTPRequestHandler):
     service: ReportService  # injected in serve()
     chat: ChatService       # injected in serve()
     cards: CardStore        # injected in serve()
+    community: CommunityService
     limiter: RateLimiter    # injected in serve()
     promoted: dict          # author_id -> role already auto-granted
 
@@ -159,6 +169,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
+
+        # Handled before the JSON body read: this one is multipart.
+        if path == "/api/community/evidence":
+            return self._post_evidence()
+
         try:
             body = self._read_json()
         except ValueError as exc:
@@ -193,6 +208,15 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/trust/run":
             return self._post_trust_run(body)
+
+        if path == "/api/community/resource":
+            return self._post_resource(body)
+
+        if path == "/api/community/feed":
+            return self._post_feed(body)
+
+        if path == "/api/community/moderate":
+            return self._post_moderate(body)
 
         match = re.fullmatch(r"/api/reports/([^/]+)/status", path)
         if match:
@@ -363,6 +387,29 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/banner":
             return self._send(200, {"banner": self.chat.banner()})
 
+        if path == "/api/community":
+            viewer = "official" if can(self.role(), "moderate.flag") else "public"
+            author = query.get("author_id", [None])[0]
+            session = self.session()
+            if session:
+                author = f"card:{session['card_id']}"
+            return self._send(200, {
+                "resources": self.community.items(RESOURCE_TYPE, viewer=viewer,
+                                                  author_id=author),
+                "evidence": self.community.items(EVIDENCE_TYPE, viewer=viewer,
+                                                 author_id=author),
+                "feeds": self.community.items(FEED_TYPE, viewer=viewer,
+                                              author_id=author),
+                "stacks": self.community.stacks(viewer=viewer),
+                "resource_kinds": RESOURCE_KINDS,
+                "feed_kinds": FEED_KINDS,
+            })
+
+        if path == "/api/community/queue":
+            if self.require("moderate.flag") is None:
+                return
+            return self._send(200, {"queue": self.community.queue()})
+
         if path == "/api/auth/me":
             session = self.session()
             return self._send(200, {
@@ -506,6 +553,133 @@ class Handler(BaseHTTPRequestHandler):
 
         return self._send(201, {"ok": True, "status": status, "signal": signal})
 
+    # -- community ---------------------------------------------------------
+
+    def _who(self, body: dict) -> tuple[str, str, bool]:
+        """(author_id, author_name, trusted). Trusted skips the queue."""
+        session = self.session()
+        if session:
+            return (f"card:{session['card_id']}", session["holder"], True)
+        return (str(body.get("author_id") or "")[:64],
+                str(body.get("author_name") or "Anonymous")[:80],
+                False)
+
+    def _post_resource(self, body: dict) -> None:
+        author_id, author_name, trusted = self._who(body)
+        if not author_id:
+            return self._error(400, "missing author_id")
+        detail = str(body.get("detail") or "").strip()
+        if not detail:
+            return self._error(400, "say what you're offering, in a few words")
+        try:
+            item = self.community.offer_resource(
+                kind=str(body.get("kind") or "other"),
+                detail=detail,
+                author_id=author_id, author_name=author_name,
+                lat=_coord(body.get("lat")), lng=_coord(body.get("lng")),
+                place_name=(str(body.get("place_name"))[:200]
+                            if body.get("place_name") else None),
+                contact=(str(body.get("contact"))[:120] if body.get("contact") else None),
+                visibility=("officials" if body.get("visibility") == "officials"
+                            else "public"),
+                trusted=trusted,
+            )
+        except StoreFull as exc:
+            return self._error(503, str(exc))
+        except ValueError as exc:
+            return self._error(400, str(exc))
+        return self._send(201, {"ok": True, "id": item["id"],
+                                "state": APPROVED if trusted else PENDING})
+
+    def _post_feed(self, body: dict) -> None:
+        author_id, author_name, trusted = self._who(body)
+        url = str(body.get("url") or "").strip()
+        # http(s) only. A javascript: or data: URL rendered as a link is a
+        # script somebody else gets to run on this origin.
+        if not re.match(r"^https?://[^\s]+$", url, re.I):
+            return self._error(400, "that needs to be a full http:// or https:// link")
+        try:
+            item = self.community.add_feed(
+                url=url[:2000], kind=str(body.get("kind") or "page"),
+                label=str(body.get("label") or "")[:200],
+                author_id=author_id, author_name=author_name,
+                lat=_coord(body.get("lat")), lng=_coord(body.get("lng")),
+                trusted=trusted)
+        except StoreFull as exc:
+            return self._error(503, str(exc))
+        return self._send(201, {"ok": True, "id": item["id"],
+                                "state": APPROVED if trusted else PENDING})
+
+    def _post_moderate(self, body: dict) -> None:
+        session = self.require("moderate.flag")
+        if session is None:
+            return
+        try:
+            self.community.decide(str(body.get("item_id") or ""),
+                                  state=str(body.get("state") or ""),
+                                  actor=session["holder"],
+                                  reason=str(body.get("reason") or "")[:500])
+        except KeyError:
+            return self._error(404, "nothing with that id to moderate")
+        except ValueError as exc:
+            return self._error(400, str(exc))
+        return self._send(201, {"ok": True})
+
+    def _post_evidence(self) -> None:
+        """multipart/form-data: an image plus a caption."""
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0:
+            return self._error(400, "empty upload")
+        if length > MAX_UPLOAD_BYTES:
+            return self._error(413, "that upload is too large — 8 MB maximum")
+
+        raw = self.rfile.read(length)
+        try:
+            fields = parse_multipart(raw, self.headers.get("Content-Type", ""))
+        except ValueError as exc:
+            return self._error(400, str(exc))
+
+        image = fields.get("image")
+        if not isinstance(image, bytes):
+            return self._error(400, "no image in that upload")
+
+        # Read the location BEFORE stripping, since stripping is what removes
+        # it. The uploader is shown what was read.
+        found = read_location(image)
+
+        try:
+            stored = store_image(image)
+        except TooLarge as exc:
+            return self._error(413, str(exc))
+        except BadImage as exc:
+            return self._error(415, str(exc))
+
+        author_id, author_name, trusted = self._who(fields)
+        lat = _coord(fields.get("lat")) if fields.get("lat") else found.get("lat")
+        lng = _coord(fields.get("lng")) if fields.get("lng") else found.get("lng")
+
+        item = self.community.add_evidence(
+            image_url=stored["url"],
+            caption=str(fields.get("caption") or "")[:500],
+            author_id=author_id or "anon", author_name=author_name,
+            lat=lat, lng=lng,
+            place_name=(str(fields.get("place_name"))[:200]
+                        if fields.get("place_name") else None),
+            located_by=("photo metadata" if found.get("lat") and not fields.get("lat")
+                        else "manual"),
+            taken_at=None,
+            trusted=trusted)
+
+        return self._send(201, {
+            "ok": True, "id": item["id"],
+            "state": APPROVED if trusted else PENDING,
+            "url": stored["url"],
+            "located_by": item["raw"]["located_by"] if item.get("raw") else "manual",
+            "lat": lat, "lng": lng,
+            "found_location": bool(found.get("lat")),
+            "metadata_stripped": stored["stripped"],
+        })
+
     # -- auth --------------------------------------------------------------
 
     def _post_redeem(self, body: dict) -> None:
@@ -574,6 +748,8 @@ class Handler(BaseHTTPRequestHandler):
     # -- static ------------------------------------------------------------
 
     def _serve_static(self, path: str) -> None:
+        if path.startswith("/uploads/"):
+            return self._serve_upload(path[len("/uploads/"):])
         if path in ("/", ""):
             path = "/index.html"
 
@@ -590,6 +766,27 @@ class Handler(BaseHTTPRequestHandler):
         if not target.is_file():
             return self._error(404, "not found")
         self._serve_file(target)
+
+    def _serve_upload(self, name: str) -> None:
+        """Serve a stored photo, with the headers that keep it a photo."""
+        found = resolve(name)
+        if found is None:
+            return self._error(404, "not found")
+        path, content_type = found
+        data = path.read_bytes()
+
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        # The file is a stranger's upload. nosniff stops a browser deciding it
+        # is really HTML; the CSP makes it inert even if one ever did; and
+        # attachment-free inline display is fine for an image but never for
+        # anything active.
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", "default-src 'none'; sandbox")
+        self.send_header("Cache-Control", "public, max-age=3600")
+        self.end_headers()
+        self.wfile.write(data)
 
     def _serve_file(self, target: Path, fallback: dict | None = None) -> None:
         if not target.is_file():
@@ -639,6 +836,7 @@ def serve(host: str = "127.0.0.1", port: int = 8080,
     handler = type("BoundHandler", (Handler,), {
         "service": service,
         "chat": ChatService(store),
+        "community": CommunityService(store),
         "cards": cards,
         "limiter": RateLimiter(),
         "promoted": {},
