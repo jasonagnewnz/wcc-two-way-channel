@@ -23,6 +23,11 @@ const state = {
            lat: null, lng: null },
   mine: [],          // reference codes held on this device
   openOps: null,     // which ops card is expanded
+  authorId: null,    // per-browser token; possession, not authentication
+  displayName: '',
+  boardChannel: 'wellington',
+  channels: { public: [], agency: [] },
+  banner: null,
 };
 
 const MINE_KEY = 'wcc-two-way/my-reports';
@@ -281,6 +286,8 @@ function showView(name) {
   $$('.view').forEach(v => v.classList.toggle('is-active', v.id === `view-${name}`));
   if (name === 'mine') renderMine();
   if (name === 'ops') renderOps();
+  if (name === 'board') { renderBoardChannels(); renderBoard(); }
+  if (name === 'wall') renderWall();
 }
 
 // ── report form ──────────────────────────────────────────────────────────
@@ -582,9 +589,14 @@ async function refresh(force = false) {
 
     const data = await api('/api/reports');
     state.reports = data.reports || [];
+    // The wall needs the agency list, which the public viewer never gets.
+    await loadChannels(state.view === 'wall' ? 'official' : 'public');
+    await refreshBanner();
 
     if (state.view === 'ops') renderOps();
     if (state.view === 'mine') renderMine();
+    if (state.view === 'board') { renderBoardChannels(); renderBoard(); }
+    if (state.view === 'wall') renderWall();
   } catch (_) {
     // Offline or the server restarted. Keep the last good render on screen
     // and try again on the next tick rather than blanking the page.
@@ -595,6 +607,7 @@ async function refresh(force = false) {
 
 async function boot() {
   loadMine();
+  ensureIdentity();
   updateMineCount();
 
   $$('.tab').forEach(tab => {
@@ -604,6 +617,10 @@ async function boot() {
   state.meta = await api('/api/meta');
   initReportForm();
   initLookup();
+  initBoard();
+  initWall();
+  await loadChannels('public');
+  await refreshBanner();
 
   reportMap = new Map($('#map-report'), state.meta.extent);
   opsMap = new Map($('#map-ops'), state.meta.extent);
@@ -641,3 +658,300 @@ boot().catch(err => {
   banner.textContent = `Could not start: ${err.message}`;
   document.body.prepend(banner);
 });
+
+/* ── message board ───────────────────────────────────────────────────────
+ *
+ * Same append-only log as reports, three surfaces on top of it. A message is
+ * a signal; a flag is a signal chaining to it; the banner is a signal. So
+ * "who said what, when, and what an official did about it" is answerable
+ * after the fact without any extra machinery.
+ */
+
+const ID_KEY = 'wcc-two-way/author-id';
+const NAME_KEY = 'wcc-two-way/display-name';
+
+/** A random per-browser token. Not authentication — it proves nothing. It
+ *  only lets the board show you your own private messages after a reload,
+ *  the same possession model as the report reference code. */
+function ensureIdentity() {
+  let id = null;
+  try { id = localStorage.getItem(ID_KEY); } catch (_) {}
+  if (!id) {
+    id = 'anon-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+    try { localStorage.setItem(ID_KEY, id); } catch (_) {}
+  }
+  state.authorId = id;
+  try { state.displayName = localStorage.getItem(NAME_KEY) || ''; } catch (_) { state.displayName = ''; }
+}
+
+function saveDisplayName(name) {
+  state.displayName = name;
+  try { localStorage.setItem(NAME_KEY, name); } catch (_) {}
+}
+
+// ── banner ───────────────────────────────────────────────────────────────
+
+async function refreshBanner() {
+  let banner = null;
+  try { banner = (await api('/api/banner')).banner; } catch (_) { return; }
+  state.banner = banner;
+
+  const el = $('#comms-banner');
+  if (!banner) { el.hidden = true; return; }
+
+  el.hidden = false;
+  el.className = `commsbanner l-${banner.level}`;
+  $('#cb-tag').textContent = banner.level === 'critical' ? 'Urgent' : banner.level;
+  $('#cb-text').textContent = banner.text;
+  $('#cb-meta').textContent = banner.at ? `posted ${clock(banner.at)}` : '';
+}
+
+// ── shared message rendering ─────────────────────────────────────────────
+
+function messageHtml(m, { official = false } = {}) {
+  if (m.withheld) {
+    return `<article class="msg is-withheld">
+      <div class="who"><span class="tag t-flagged">Withheld</span>
+        <span class="at">${esc(clock(m.at))}</span></div>
+      <div class="bubble">${esc(m.body)}</div>
+    </article>`;
+  }
+
+  const isOfficial = m.author_role === 'official';
+  const classes = ['msg'];
+  if (m.mine) classes.push('is-mine');
+  if (isOfficial) classes.push('is-official');
+
+  const tags = [];
+  if (isOfficial) tags.push(`<span class="tag t-official">${esc(m.agency || 'Official')}</span>`);
+  if (m.author_role === 'hub') tags.push('<span class="tag t-hub">Emergency hub</span>');
+  if (m.visibility === 'officials') tags.push('<span class="tag t-private">Private to officials</span>');
+  if (m.flagged) tags.push('<span class="tag t-flagged">Flagged</span>');
+
+  return `<article class="${classes.join(' ')}">
+    <div class="who">
+      <span class="name">${esc(m.author_name || 'Anonymous')}</span>
+      ${tags.join('')}
+      <span class="at">${esc(clock(m.at))}</span>
+    </div>
+    <div class="bubble">${esc(m.body)}</div>
+    ${official ? `<div class="row" style="margin-top:4px">
+        <button class="btn tiny ghost" data-flag="${esc(m.id)}" data-unflag="${m.flagged ? '1' : ''}">
+          ${m.flagged ? 'Clear flag' : 'Flag'}
+        </button>
+        ${m.flag_reason ? `<span class="at">${esc(m.flag_reason)}</span>` : ''}
+      </div>` : ''}
+  </article>`;
+}
+
+function wireFlagButtons(root) {
+  $$('[data-flag]', root).forEach(btn => {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      const unflag = btn.dataset.unflag === '1';
+      const reason = unflag ? '' :
+        (prompt('Why is this being flagged? (shown to officials, logged)') || 'Flagged by an official.');
+      try {
+        await api('/api/chat/flag', {
+          method: 'POST',
+          body: JSON.stringify({ message_id: btn.dataset.flag, reason, unflag }),
+        });
+        await refresh(true);
+      } catch (err) {
+        alert(err.message);
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+// ── public board ─────────────────────────────────────────────────────────
+
+async function loadChannels(viewer) {
+  state.channels = await api(`/api/chat/channels?viewer=${viewer}`);
+}
+
+function renderBoardChannels() {
+  const wrap = $('#board-channels');
+  wrap.innerHTML = (state.channels.public || []).map(c => `
+    <button class="chan ${c.id === state.boardChannel ? 'is-active' : ''}" data-chan="${esc(c.id)}">
+      <span class="n">${esc(c.name)}</span>
+      <span class="c">${c.messages || 0}</span>
+    </button>`).join('');
+  $$('[data-chan]', wrap).forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.boardChannel = btn.dataset.chan;
+      renderBoardChannels();
+      renderBoard();
+    });
+  });
+}
+
+async function renderBoard() {
+  const channel = (state.channels.public || []).find(c => c.id === state.boardChannel);
+  $('#board-title').textContent = channel ? channel.name : state.boardChannel;
+
+  let messages = [];
+  try {
+    messages = (await api(
+      `/api/chat/messages?channel=${encodeURIComponent(state.boardChannel)}` +
+      `&author_id=${encodeURIComponent(state.authorId)}`)).messages;
+  } catch (err) {
+    $('#board-messages').innerHTML = `<p class="empty">${esc(err.message)}</p>`;
+    return;
+  }
+
+  $('#board-count').textContent = `${messages.length} message${messages.length === 1 ? '' : 's'}`;
+  const box = $('#board-messages');
+  const wasAtBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+  box.innerHTML = messages.length
+    ? messages.map(m => messageHtml(m)).join('')
+    : '<p class="empty">Nothing here yet. Say something.</p>';
+  if (wasAtBottom) box.scrollTop = box.scrollHeight;
+}
+
+function initBoard() {
+  // Default must be set BEFORE chipGroup renders, or it marks nothing as
+  // pressed and the composer opens with no visibility visibly selected.
+  state.draft.visibility = 'public';
+  chipGroup($('#board-visibility'), ['public', 'officials'], 'visibility', {
+    public: 'Everyone can see this', officials: 'Only officials',
+  });
+  updateVisibilityHint();
+  $$('#board-visibility .chip').forEach(c =>
+    c.addEventListener('click', () => setTimeout(updateVisibilityHint, 0)));
+
+  const nameInput = $('#display-name');
+  nameInput.value = state.displayName;
+  nameInput.addEventListener('change', () => saveDisplayName(nameInput.value.trim()));
+
+  $('#board-composer').addEventListener('submit', async event => {
+    event.preventDefault();
+    const body = $('#board-body').value.trim();
+    if (!body) return;
+    try {
+      await api('/api/chat/messages', {
+        method: 'POST',
+        body: JSON.stringify({
+          channel_id: state.boardChannel,
+          body,
+          author_name: state.displayName || 'Anonymous',
+          author_id: state.authorId,
+          author_role: 'resident',
+          visibility: state.draft.visibility,
+        }),
+      });
+      $('#board-body').value = '';
+      await refresh(true);
+    } catch (err) {
+      showError('#board-error', err.message);
+    }
+  });
+}
+
+function updateVisibilityHint() {
+  $('#visibility-hint').textContent = state.draft.visibility === 'officials'
+    ? 'Only Council and emergency services will see this. Use it for anything about a named person.'
+    : 'Everyone on this board will see this, including your neighbours.';
+}
+
+// ── agency wall ──────────────────────────────────────────────────────────
+
+async function renderWall() {
+  const wall = $('#agency-wall');
+
+  // The wall needs the agency list, and boot only fetches the public one —
+  // a public viewer is never given agency channels at all. Load them here
+  // rather than depending on a poll having happened to run first.
+  if (!(state.channels.agency || []).length) {
+    try { await loadChannels('official'); }
+    catch (_) { /* fall through to the empty state below */ }
+  }
+  const agencies = state.channels.agency || [];
+
+  if (!agencies.length) {
+    wall.innerHTML = '<p class="empty">No agency channels.</p>';
+    return;
+  }
+
+  const panes = await Promise.all(agencies.map(async a => {
+    let messages = [];
+    try {
+      messages = (await api(
+        `/api/chat/messages?channel=${encodeURIComponent(a.id)}&viewer=official`)).messages;
+    } catch (_) { messages = []; }
+    return { a, messages };
+  }));
+
+  wall.innerHTML = panes.map(({ a, messages }) => `
+    <section class="wallpane" style="border-top-color:${esc(a.colour || '#7285a0')}">
+      <h3>${esc(a.name)}</h3>
+      <p class="sub">${messages.length} message${messages.length === 1 ? '' : 's'} · officials only</p>
+      <div class="messages">
+        ${messages.length ? messages.map(m => messageHtml(m, { official: true })).join('')
+                          : '<p class="empty">Quiet.</p>'}
+      </div>
+      <form class="composer" data-agency="${esc(a.id)}">
+        <textarea rows="2" maxlength="2000" placeholder="Message ${esc(a.short || a.name)}…"></textarea>
+        <div class="composer-row">
+          <span class="at">Posting as ${esc(a.short || a.name)}</span>
+          <button class="btn primary compact" type="submit">Send</button>
+        </div>
+      </form>
+    </section>`).join('');
+
+  wall.querySelectorAll('.messages').forEach(box => { box.scrollTop = box.scrollHeight; });
+  wireFlagButtons(wall);
+
+  $$('[data-agency]', wall).forEach(form => {
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const textarea = form.querySelector('textarea');
+      const body = textarea.value.trim();
+      if (!body) return;
+      const agency = agencies.find(x => x.id === form.dataset.agency);
+      try {
+        await api('/api/chat/messages', {
+          method: 'POST',
+          body: JSON.stringify({
+            channel_id: form.dataset.agency,
+            body,
+            author_name: 'Duty Officer',
+            author_id: state.authorId,
+            author_role: 'official',
+            agency: agency ? agency.name : null,
+            visibility: 'public',
+          }),
+        });
+        textarea.value = '';
+        await refresh(true);
+      } catch (err) { alert(err.message); }
+    });
+  });
+}
+
+function initWall() {
+  state.draft.bannerLevel = 'warning';
+  chipGroup($('#banner-levels'), ['info', 'advisory', 'warning', 'critical'], 'bannerLevel');
+
+  $('#banner-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const text = $('#banner-text').value.trim();
+    if (!text) return;
+    try {
+      await api('/api/banner', {
+        method: 'POST',
+        body: JSON.stringify({ text, level: state.draft.bannerLevel, active: true }),
+      });
+      $('#banner-text').value = '';
+      await refreshBanner();
+    } catch (err) { alert(err.message); }
+  });
+
+  $('#banner-clear').addEventListener('click', async () => {
+    try {
+      await api('/api/banner', { method: 'POST', body: JSON.stringify({ text: '', active: false }) });
+      await refreshBanner();
+    } catch (err) { alert(err.message); }
+  });
+}

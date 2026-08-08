@@ -17,6 +17,13 @@ POST /api/reports/<ref>/status  one-tap status update
 GET  /api/geojson               all reports as GeoJSON  <- the shared map reads this
 GET  /api/signals               the raw append-only log
 GET  /api/basemap               cached WCC hazard geometry for the map
+
+GET  /api/banner                the important-comms banner, if one is showing
+POST /api/banner                publish or clear it
+GET  /api/chat/channels         channel lists, filtered by ?viewer=
+GET  /api/chat/messages         ?channel= &viewer= &author_id=
+POST /api/chat/messages         post to a board or an agency channel
+POST /api/chat/flag             flag / unflag a message
 """
 
 from __future__ import annotations
@@ -29,6 +36,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from core.chat import ChatService
 from core.hazard import lookup_async, summary
 from core.reports import ISSUE_TYPES, STATUS_LABELS, STATUSES, ReportService
 from core.signals import SEVERITIES
@@ -49,8 +57,9 @@ _REF_RE = re.compile(r"^WLG-[A-Z2-9]{5}$")
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "wcc-two-way/1.0"
+    server_version = "wcc-two-way/1.1"
     service: ReportService  # injected in serve()
+    chat: ChatService       # injected in serve()
 
     # -- plumbing ----------------------------------------------------------
 
@@ -118,11 +127,73 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/reports":
             return self._post_report(body)
 
+        if path == "/api/chat/messages":
+            return self._post_message(body)
+
+        if path == "/api/chat/flag":
+            return self._post_flag(body)
+
+        if path == "/api/banner":
+            return self._post_banner(body)
+
         match = re.fullmatch(r"/api/reports/([^/]+)/status", path)
         if match:
             return self._post_status(match.group(1), body)
 
         return self._error(404, "no such endpoint")
+
+    # -- chat --------------------------------------------------------------
+
+    def _post_message(self, body: dict) -> None:
+        try:
+            message = self.chat.post(
+                channel_id=str(body.get("channel_id") or "").strip(),
+                body=str(body.get("body") or ""),
+                author_name=str(body.get("author_name") or "Anonymous")[:80],
+                author_id=str(body.get("author_id") or "")[:64],
+                author_role=("official" if body.get("author_role") == "official"
+                             else str(body.get("author_role") or "resident")[:20]),
+                agency=(str(body.get("agency"))[:80] if body.get("agency") else None),
+                visibility=str(body.get("visibility") or "public"),
+                reply_to=(str(body.get("reply_to"))[:32] if body.get("reply_to") else None),
+            )
+        except PermissionError as exc:
+            return self._error(403, str(exc))
+        except StoreFull as exc:
+            return self._error(503, str(exc))
+        except ValueError as exc:
+            return self._error(400, str(exc))
+        return self._send(201, {"ok": True, "id": message["id"]})
+
+    def _post_flag(self, body: dict) -> None:
+        try:
+            self.chat.flag(
+                str(body.get("message_id") or ""),
+                reason=str(body.get("reason") or "")[:500],
+                actor=str(body.get("actor") or "wcc-staff")[:40],
+                unflag=bool(body.get("unflag")),
+            )
+        except KeyError:
+            return self._error(404, "no message with that id")
+        except StoreFull as exc:
+            return self._error(503, str(exc))
+        except ValueError as exc:
+            return self._error(400, str(exc))
+        return self._send(201, {"ok": True})
+
+    def _post_banner(self, body: dict) -> None:
+        try:
+            self.chat.set_banner(
+                text=str(body.get("text") or ""),
+                level=str(body.get("level") or "warning"),
+                actor=str(body.get("actor") or "wcc-staff")[:40],
+                active=body.get("active", True) is not False,
+            )
+        except StoreFull as exc:
+            return self._error(503, str(exc))
+        except ValueError as exc:
+            return self._error(400, str(exc))
+        return self._send(201, {"ok": True, "banner": self.chat.banner()})
 
     # -- GET handlers ------------------------------------------------------
 
@@ -157,6 +228,26 @@ class Handler(BaseHTTPRequestHandler):
             since = _int(query.get("since", ["0"])[0], 0)
             rows = svc.store.fetch(limit=0, since=since)
             return self._send(200, {"cursor": svc.store.count(), "signals": rows})
+
+        if path == "/api/chat/channels":
+            viewer = _viewer(query)
+            return self._send(200, self.chat.channels(viewer=viewer))
+
+        if path == "/api/chat/messages":
+            channel = query.get("channel", [""])[0]
+            if not channel:
+                return self._error(400, "channel is required")
+            try:
+                return self._send(200, {"messages": self.chat.messages(
+                    channel,
+                    viewer=_viewer(query),
+                    author_id=query.get("author_id", [None])[0],
+                )})
+            except PermissionError as exc:
+                return self._error(403, str(exc))
+
+        if path == "/api/banner":
+            return self._send(200, {"banner": self.chat.banner()})
 
         if path == "/api/basemap":
             return self._serve_file(WEB / "data" / "basemap.json",
@@ -299,6 +390,17 @@ def _int(value: str, default: int) -> int:
         return default
 
 
+def _viewer(query: dict) -> str:
+    """public unless the caller explicitly asks for the official view.
+
+    There is no authentication behind this — a caller can simply say
+    "official". That is a deliberate, documented limitation of the prototype,
+    not an oversight: adding real identity is the first thing this needs
+    before it is anything more than a demo.
+    """
+    return "official" if query.get("viewer", ["public"])[0] == "official" else "public"
+
+
 def _coord(value) -> float | None:
     if value in (None, ""):
         return None
@@ -313,7 +415,10 @@ def serve(host: str = "127.0.0.1", port: int = 8080,
     store = SignalStore(store_path) if store_path else SignalStore()
     service = ReportService(store)
 
-    handler = type("BoundHandler", (Handler,), {"service": service})
+    handler = type("BoundHandler", (Handler,), {
+        "service": service,
+        "chat": ChatService(store),
+    })
     httpd = ThreadingHTTPServer((host, port), handler)
 
     print(f"\n  Two-way channel running:  http://{host}:{port}")

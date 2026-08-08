@@ -69,6 +69,60 @@ is the failure mode these problem statements are most wary of.
 
 ---
 
+## The message board
+
+The reporting loop is one-to-one: you tell the council something, the council
+tells you what happened to it. The board is the other half — everyone talking
+to everyone, with officials clearly identifiable.
+
+Three surfaces, one log:
+
+- **Agency wall** — eight real agencies (WCC Emergency Management, WREMO,
+  Wellington Water, FENZ, Police, Greater Wellington, Free Ambulance, Red
+  Cross), each its own channel, all on one screen. Officials coordinating with
+  each other. **The public are not in these and cannot read them** — a request
+  for an agency channel from a public viewer is a 403, not a filtered list.
+- **Public boards** — a city-wide board plus one per suburb. Anyone posts.
+  Officials are badged with their agency; everyone else is a neighbour.
+- **Important comms banner** — officials publish one line and it appears at
+  the top of every public screen at once, at four escalating levels.
+
+### Visibility and flagging
+
+The person posting chooses **Everyone can see this** or **Only officials** —
+the second is for anything about a named person, like a welfare concern about
+a neighbour. Officials can flag a message, which takes it out of the public
+feed and leaves a visible marker in its place.
+
+That last detail is the point. Because the log is append-only, a flag is a new
+signal chaining to the message rather than an edit or a delete. **Moderation
+on a public emergency board can never silently erase what somebody said** —
+the content goes, the fact that something was there does not. Officials still
+see the original and the reason. Clearing a banner works the same way: another
+entry, not a deletion, so afterwards you can say exactly what was displayed
+and for how long.
+
+### Identity
+
+There is none, deliberately, and it is the same possession model as the
+reference code. A browser mints a random `author_id` into `localStorage`; it
+proves nothing, it just lets the board show you your own private messages
+after a reload. **Officials are marked by a role the client sets, so on a
+public deployment anyone can claim to be one.** Real identity is the first
+thing this needs before it is more than a demo — see the limitations below.
+
+### The demo data is invented
+
+`demo_data.py` fills the board with a single coherent scenario: heavy rain,
+flooding at Ngauranga, a slip in Wadestown, a power cut in Aro Valley — the
+same incidents as the seeded reports. The agencies are real so a WCC judge
+sees their own operating picture, but **none of them wrote any of it and it
+describes no real incident**. The agency wall says so on screen. If this ever
+moves beyond a prototype, that file goes and the channels stay empty until the
+agencies are actually in them.
+
+---
+
 ## It composes
 
 The brief asks for modules that feed one shared common operating picture,
@@ -103,6 +157,12 @@ Each feature carries `reference`, `issue_type`, `severity`, `status`,
 | `GET /api/geojson` | reports as GeoJSON |
 | `GET /api/signals?since=` | the append-only log |
 | `GET /api/basemap` | cached WCC hazard geometry |
+| `GET /api/banner` | the important-comms banner, if one is showing |
+| `POST /api/banner` | publish or clear it |
+| `GET /api/chat/channels?viewer=` | channel lists (agency channels only for officials) |
+| `GET /api/chat/messages?channel=` | messages, filtered for who is asking |
+| `POST /api/chat/messages` | post to a board or an agency channel |
+| `POST /api/chat/flag` | flag / unflag a message |
 
 ---
 
@@ -160,10 +220,12 @@ enrichment/            prep-kit helpers (two bugs fixed — see below)
 ### Tests
 
 ```bash
-python3 -m unittest discover tests -v      # 22 tests, ~0.4s
+python3 -m unittest discover tests -v      # 46 tests, ~0.6s
 ```
 
-They cover the things that would break the demo or mislead the council:
+They cover the things that would break the demo or mislead the council, plus
+every message-board visibility rule — who can read an agency channel, whether a
+private message leaks, and that flagging never deletes:
 acknowledgement fires without a human, status is derived rather than stored,
 the log survives a restart (including a torn final line), grouping does what
 the interface claims, and GeoJSON comes out lng/lat the right way round.
@@ -226,7 +288,11 @@ Roughly in order of demo value.
 - **The reporter cannot reply.** Genuinely two-way would let them answer
   "is it still blocked?" — a second signal type chaining to the same report.
 - **Nothing is authenticated.** Anyone who can reach the server can set any
-  status. Fine for a demo room, not for anything further. See below.
+  status, and anyone can claim the official role on the message board. Fine for
+  a demo room, not for anything further. See below.
+- **The reporter cannot reply on their own thread yet.** The board covers
+  everyone-to-everyone; per-report conversation reuses the same primitive
+  (`channel_id` = the reference code) and is the next thing to wire up.
 
 ---
 

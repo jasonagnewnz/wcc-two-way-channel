@@ -73,7 +73,45 @@ def seed(store_path: str | None) -> None:
     first = service.reports()[0]["id"]
     service.set_status(first, "reviewing", note="Duty officer checking against the flood layer.")
     service.set_status(first, "responding", note="Contractor dispatched to close the lane.")
-    print(f"\n  {first} advanced to 'responding' so the timeline has something in it.\n")
+    print(f"\n  {first} advanced to 'responding' so the timeline has something in it.")
+
+    seed_chat(store)
+
+
+def seed_chat(store: SignalStore) -> None:
+    """Fill the message board. Every message is invented — see demo_data.py."""
+    import demo_data
+    from core.chat import ChatService
+
+    chat = ChatService(store)
+
+    for channel, author, agency, body, visibility in demo_data.AGENCY_MESSAGES:
+        chat.post(channel_id=channel, body=body, author_name=author,
+                  author_id=f"demo-{channel}", author_role="official",
+                  agency=agency, visibility=visibility)
+
+    last_newtown = None
+    for channel, author, role, body, visibility in demo_data.PUBLIC_MESSAGES:
+        message = chat.post(channel_id=channel, body=body, author_name=author,
+                            author_id=f"demo-{author.lower().replace(' ', '-')}",
+                            author_role=role,
+                            agency=("Wellington City Council" if role == "official" else None),
+                            visibility=visibility)
+        if channel == "newtown":
+            last_newtown = message["id"]
+
+    chat.set_banner(**demo_data.BANNER, actor="wcc-duty-controller")
+
+    # Flag the last Newtown message so the demo has a worked example of
+    # moderation: out of the public feed, marker left behind, flag in the log.
+    if last_newtown:
+        chat.flag(last_newtown, reason=demo_data.FLAG_LAST_NEWTOWN_REASON,
+                  actor="wcc-moderator")
+
+    agency_count = len(demo_data.AGENCY_MESSAGES)
+    public_count = len(demo_data.PUBLIC_MESSAGES)
+    print(f"  seeded message board: {agency_count} agency + {public_count} public "
+          f"messages, 1 banner, 1 flagged message\n")
 
 
 def reset(store_path: str | None, *, assume_yes: bool = False) -> int:

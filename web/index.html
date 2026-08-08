@@ -24,9 +24,19 @@
   <nav class="tabs" role="tablist">
     <button class="tab is-active" data-view="report" role="tab">Report an issue</button>
     <button class="tab" data-view="mine" role="tab">My reports <span class="pill" id="mine-count" hidden></span></button>
+    <button class="tab" data-view="board" role="tab">Message board</button>
     <button class="tab" data-view="ops" role="tab">WCC view</button>
+    <button class="tab" data-view="wall" role="tab">Agency wall</button>
   </nav>
 </header>
+
+<!-- Important comms banner. Officials publish one line; it appears at the top
+     of every surface at once. Hidden until there is one. -->
+<div class="commsbanner" id="comms-banner" role="alert" hidden>
+  <span class="cb-tag" id="cb-tag"></span>
+  <span class="cb-text" id="cb-text"></span>
+  <span class="cb-meta" id="cb-meta"></span>
+</div>
 
 <p class="disclaimer" role="note">
   <strong>Prototype.</strong> Built in a day for Impact Lab Wellington. Not a live council service.
@@ -136,6 +146,72 @@
       <p class="error" id="lookup-error" hidden></p>
     </div>
     <div id="mine-list" class="stack"></div>
+  </section>
+
+  <!-- ── Message board (public) ─────────────────────────────── -->
+  <section class="view" id="view-board">
+    <div class="split boards">
+      <div class="card">
+        <h1>Message board</h1>
+        <p class="hint">
+          A place for everyone. Officials are badged; everyone else is a neighbour.
+          Pick where you're posting.
+        </p>
+        <div class="channels" id="board-channels"></div>
+        <div class="whoami">
+          <label>
+            <span>Posting as</span>
+            <input id="display-name" maxlength="80" placeholder="Your name or a nickname">
+          </label>
+          <p class="hint">No account. This is just what shows next to your messages.</p>
+        </div>
+      </div>
+
+      <div class="card chatpane">
+        <div class="chathead">
+          <h2 id="board-title">Wellington — everyone</h2>
+          <span class="counter" id="board-count"></span>
+        </div>
+        <div class="messages" id="board-messages"></div>
+        <form class="composer" id="board-composer">
+          <textarea id="board-body" rows="2" maxlength="2000"
+                    placeholder="Say what you're seeing, or ask the neighbourhood…"></textarea>
+          <div class="composer-row">
+            <div class="chips" id="board-visibility"></div>
+            <button class="btn primary compact" type="submit">Post</button>
+          </div>
+          <p class="hint" id="visibility-hint"></p>
+          <p class="error" id="board-error" hidden></p>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Agency wall (officials) ────────────────────────────── -->
+  <section class="view" id="view-wall">
+    <div class="card bannerctl">
+      <h1>Important comms</h1>
+      <p class="hint">
+        One line, pushed to the top of every public screen at once. Clearing it is
+        another entry in the log, not a deletion — you can always say what was
+        showing and for how long.
+      </p>
+      <form class="row" id="banner-form">
+        <div class="chips" id="banner-levels"></div>
+        <input id="banner-text" class="grow" maxlength="500"
+               placeholder="e.g. Orange heavy rain warning until 8pm…">
+        <button class="btn primary compact" type="submit">Publish</button>
+        <button class="btn ghost compact" type="button" id="banner-clear">Clear</button>
+      </form>
+    </div>
+
+    <p class="demowarn">
+      <strong>Demo data.</strong> These are real agencies, but every message below is
+      invented for this prototype. None of these organisations wrote any of it, and
+      it does not describe a real incident.
+    </p>
+
+    <div class="wall" id="agency-wall"></div>
   </section>
 
   <!-- ── WCC ops ────────────────────────────────────────────── -->

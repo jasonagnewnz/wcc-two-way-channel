@@ -310,3 +310,115 @@ legend {
 .attrib { font-size: .7rem; color: var(--ink-3); margin: 7px 0 0; line-height: 1.4; }
 
 .empty { color: var(--ink-3); font-size: .86rem; text-align: center; padding: 26px 10px; }
+
+/* ── message board, agency wall, comms banner ───────────── */
+
+.commsbanner {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline;
+  padding: 10px 16px; font-size: .86rem;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--reviewing) 18%, var(--paper));
+  color: var(--ink);
+}
+.commsbanner.l-info     { background: color-mix(in srgb, var(--responding) 14%, var(--paper)); }
+.commsbanner.l-advisory { background: color-mix(in srgb, var(--reviewing) 14%, var(--paper)); }
+.commsbanner.l-warning  { background: color-mix(in srgb, var(--reviewing) 22%, var(--paper)); }
+.commsbanner.l-critical {
+  background: color-mix(in srgb, #d64545 22%, var(--paper));
+  border-bottom-color: #d64545;
+}
+.cb-tag {
+  font-size: .68rem; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 999px; flex: none;
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+.cb-text { font-weight: 600; flex: 1 1 320px; }
+.cb-meta { font-size: .72rem; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+.split.boards { grid-template-columns: minmax(0, 300px) minmax(0, 1fr); }
+@media (max-width: 900px) { .split.boards { grid-template-columns: 1fr; } }
+
+.channels { display: flex; flex-direction: column; gap: 3px; margin: 10px 0 16px; }
+.chan {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  border: 1px solid transparent; background: none; cursor: pointer;
+  font: inherit; font-size: .87rem; color: var(--ink-2);
+  padding: 8px 10px; border-radius: 8px; text-align: left;
+}
+.chan:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.chan.is-active { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--ink); font-weight: 600; }
+.chan .n { flex: 1; }
+.chan .c { font-size: .72rem; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+.whoami { border-top: 1px dashed var(--line); padding-top: 12px; }
+
+.chatpane { display: flex; flex-direction: column; min-height: 0; }
+.chathead {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line);
+}
+.messages {
+  flex: 1; overflow-y: auto; max-height: 56vh;
+  display: flex; flex-direction: column; gap: 10px; padding: 12px 2px;
+}
+
+.msg { display: flex; flex-direction: column; gap: 3px; }
+.msg .who { display: flex; flex-wrap: wrap; gap: 7px; align-items: baseline; font-size: .78rem; }
+.msg .name { font-weight: 600; color: var(--ink); }
+.msg .at { color: var(--ink-3); font-size: .72rem; font-variant-numeric: tabular-nums; }
+.msg .bubble {
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: 4px 12px 12px 12px; padding: 9px 12px;
+  font-size: .89rem; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.msg.is-mine .bubble {
+  background: color-mix(in srgb, var(--accent) 10%, var(--card));
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+.msg.is-official .bubble {
+  background: color-mix(in srgb, var(--responding) 9%, var(--card));
+  border-color: color-mix(in srgb, var(--responding) 30%, transparent);
+}
+.msg.is-withheld .bubble {
+  background: transparent; border-style: dashed; color: var(--ink-3);
+  font-style: italic; font-size: .82rem;
+}
+
+.tag {
+  font-size: .66rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 5px;
+}
+.t-official { background: color-mix(in srgb, var(--responding) 18%, transparent); color: var(--responding); }
+.t-hub      { background: color-mix(in srgb, var(--resolved) 18%, transparent); color: var(--resolved); }
+.t-private  { background: color-mix(in srgb, var(--ink-3) 22%, transparent); color: var(--ink-2); }
+.t-flagged  { background: color-mix(in srgb, #d64545 18%, transparent); color: #d64545; }
+
+.composer { border-top: 1px solid var(--line); padding-top: 10px; }
+.composer textarea { font-size: .89rem; }
+.composer-row { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-top: 7px; }
+.btn.compact { width: auto; padding: 8px 14px; }
+
+.demowarn {
+  margin: 14px 0; padding: 10px 13px; border-radius: 9px; font-size: .82rem;
+  background: color-mix(in srgb, var(--reviewing) 13%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--reviewing) 34%, transparent);
+  color: var(--ink-2);
+}
+.bannerctl .row { margin-top: 10px; }
+
+/* the wall: lots of chat screens on one page */
+.wall {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+}
+.wallpane {
+  background: var(--card); border: 1px solid var(--line); border-top: 3px solid var(--ink-3);
+  border-radius: var(--radius); padding: 11px 13px; display: flex; flex-direction: column;
+  box-shadow: var(--shadow); min-height: 250px;
+}
+.wallpane h3 { margin: 0; font-size: .85rem; letter-spacing: -.005em; }
+.wallpane .sub { font-size: .7rem; color: var(--ink-3); margin-bottom: 8px; }
+.wallpane .messages { max-height: 210px; padding: 0; gap: 8px; }
+.wallpane .msg .bubble { font-size: .8rem; padding: 7px 10px; }
+.wallpane .composer { padding-top: 8px; margin-top: 8px; }
+.wallpane .composer textarea { font-size: .8rem; }
