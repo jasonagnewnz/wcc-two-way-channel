@@ -51,12 +51,59 @@ class TestAgencyChannelsAreClosed(Base):
             self.chat.post(channel_id="fenz", body="let me in", author_name="X",
                            author_id="anon-1", author_role="resident")
 
-    def test_public_cannot_read_an_agency_channel(self):
+    def test_public_read_of_agency_channels_follows_the_demo_flag(self):
+        import core.chat as chat
         self.chat.post(channel_id="fenz", body="Two appliances committed.",
                        author_name="Comms", author_id="fenz-1",
                        author_role="official", agency="Fire and Emergency NZ")
-        with self.assertRaises(PermissionError):
-            self.chat.messages("fenz", viewer="public")
+
+        original = chat.AGENCY_CHANNELS_PUBLIC_READ
+        try:
+            chat.AGENCY_CHANNELS_PUBLIC_READ = False
+            with self.assertRaises(PermissionError):
+                self.chat.messages("fenz", viewer="public")
+
+            chat.AGENCY_CHANNELS_PUBLIC_READ = True
+            self.assertEqual(len(self.chat.messages("fenz", viewer="public")), 1)
+        finally:
+            chat.AGENCY_CHANNELS_PUBLIC_READ = original
+
+    def test_public_read_never_relaxes_posting(self):
+        # The flag opens reading only. Posting is the control that would let
+        # somebody put words in an agency's mouth, and it stays shut.
+        import core.chat as chat
+        original = chat.AGENCY_CHANNELS_PUBLIC_READ
+        try:
+            chat.AGENCY_CHANNELS_PUBLIC_READ = True
+            with self.assertRaises(PermissionError):
+                self.chat.post(channel_id="fenz", body="I am the fire service",
+                               author_name="X", author_id="anon-1",
+                               author_role="resident")
+        finally:
+            chat.AGENCY_CHANNELS_PUBLIC_READ = original
+
+    def test_public_read_never_exposes_an_internal_agency_message(self):
+        # An agency deliberating internally must stay internal even when the
+        # channel becomes readable — otherwise opening the hub for a demo
+        # publishes exactly the messages that should never be public.
+        import core.chat as chat
+        self.chat.post(channel_id="fenz", body="Public operational line.",
+                       author_name="Comms", author_id="fenz-1",
+                       author_role="official", agency="Fire and Emergency NZ")
+        self.chat.post(channel_id="fenz", body="Internal deliberation, not for release.",
+                       author_name="Comms", author_id="fenz-1",
+                       author_role="official", agency="Fire and Emergency NZ",
+                       visibility=OFFICIALS)
+
+        original = chat.AGENCY_CHANNELS_PUBLIC_READ
+        try:
+            chat.AGENCY_CHANNELS_PUBLIC_READ = True
+            seen = self.chat.messages("fenz", viewer="public", author_id="anon-other")
+            bodies = [m["body"] for m in seen]
+            self.assertIn("Public operational line.", bodies)
+            self.assertNotIn("Internal deliberation, not for release.", bodies)
+        finally:
+            chat.AGENCY_CHANNELS_PUBLIC_READ = original
 
     def test_officials_can_read_and_post(self):
         self.chat.post(channel_id="fenz", body="Two appliances committed.",
@@ -64,8 +111,23 @@ class TestAgencyChannelsAreClosed(Base):
                        author_role="official", agency="Fire and Emergency NZ")
         self.assertEqual(len(self.chat.messages("fenz", viewer="official")), 1)
 
-    def test_agency_channels_are_absent_from_the_public_channel_list(self):
-        self.assertEqual(self.chat.channels(viewer="public")["agency"], [])
+    def test_agency_channel_listing_follows_the_demo_flag(self):
+        import core.chat as chat
+        original = chat.AGENCY_CHANNELS_PUBLIC_READ
+        try:
+            chat.AGENCY_CHANNELS_PUBLIC_READ = False
+            self.assertEqual(self.chat.channels(viewer="public")["agency"], [])
+
+            chat.AGENCY_CHANNELS_PUBLIC_READ = True
+            listed = self.chat.channels(viewer="public")
+            self.assertEqual(len(listed["agency"]), len(AGENCY_CHANNELS))
+            # The interface needs to know to hide the composer rather than
+            # offer one that will 403.
+            self.assertTrue(listed["agency_read_only"])
+            self.assertFalse(self.chat.channels(viewer="official")["agency_read_only"])
+        finally:
+            chat.AGENCY_CHANNELS_PUBLIC_READ = original
+
         self.assertEqual(len(self.chat.channels(viewer="official")["agency"]),
                          len(AGENCY_CHANNELS))
 
@@ -233,11 +295,22 @@ class TestPublicSignalRedaction(Base):
         kept = {s["id"] for s in redact_for_public(invented)}
         self.assertEqual(kept, {"5"})
 
-    def test_agency_traffic_is_withheld(self):
+    def test_agency_traffic_is_withheld_from_the_raw_feed_regardless_of_the_flag(self):
+        # The demo flag opens the INTERFACE, where the messages arrive with
+        # their channel, their agency and a read-only notice around them. The
+        # raw feed is for machine consumption by other teams and carries none
+        # of that context, so it stays conservative.
+        import core.chat as chat
         from core.chat import redact_for_public
         rows = [{"id": "a", "signal_type": "chat-message",
                  "raw": {"channel_kind": "agency", "visibility": "public"}}]
-        self.assertEqual(redact_for_public(rows), [])
+        original = chat.AGENCY_CHANNELS_PUBLIC_READ
+        try:
+            for flag in (True, False):
+                chat.AGENCY_CHANNELS_PUBLIC_READ = flag
+                self.assertEqual(redact_for_public(rows), [])
+        finally:
+            chat.AGENCY_CHANNELS_PUBLIC_READ = original
 
     def test_unapproved_community_content_is_withheld(self):
         from core.chat import redact_for_public

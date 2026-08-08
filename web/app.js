@@ -91,6 +91,30 @@ function esc(value) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+/**
+ * Return the URL only if it is a plain http(s) link, else null.
+ *
+ * `esc()` is not enough for an href. It prevents an attribute breakout, but
+ * `javascript:alert(1)` contains no character escaping touches — it survives
+ * intact and runs on click. A URL is the one user-supplied value a browser
+ * treats as an instruction rather than as text.
+ *
+ * The server rejects bad schemes before storage (core/signals.safe_link), so
+ * this is the second layer: anything already in the log from before that
+ * check, or arriving from another module reading the same feed, still cannot
+ * become a link.
+ *
+ * INVARIANT: no href or src is built from stored data without passing
+ * through here first.
+ */
+function safeUrl(value) {
+  const url = String(value == null ? '' : value).trim();
+  if (/^https?:\/\/[^\s<>"']+$/i.test(url)) return url;
+  // Same-origin paths we generate ourselves: uploaded photos.
+  if (/^\/uploads\/[a-f0-9]{16}\.(jpg|png)$/i.test(url)) return url;
+  return null;
+}
+
 function titleCase(slug) {
   return String(slug || '').replace(/-/g, ' ').replace(/^./, c => c.toUpperCase());
 }
@@ -945,13 +969,14 @@ async function renderWall() {
         ${messages.length ? messages.map(m => messageHtml(m, { official: true })).join('')
                           : '<p class="empty">Quiet.</p>'}
       </div>
+      ${state.session && state.session.permissions.includes('post.agency') ? `
       <form class="composer" data-agency="${esc(a.id)}">
         <textarea rows="2" maxlength="2000" placeholder="Message ${esc(a.short || a.name)}…"></textarea>
         <div class="composer-row">
           <span class="at">Posting as ${esc(a.short || a.name)}</span>
           <button class="btn primary compact" type="submit">Send</button>
         </div>
-      </form>
+      </form>` : ''}
     </section>`).join('');
 
   wall.querySelectorAll('.messages').forEach(box => { box.scrollTop = box.scrollHeight; });
@@ -1064,8 +1089,15 @@ function renderWho() {
   // them made the whole communications hub appear to vanish for anyone not
   // signed in, which reads as the feature being gone rather than gated —
   // and a demo audience cannot ask to see something they cannot see exists.
-  $('#wall-locked').hidden = canAgency;
-  $('#wall-panel').hidden = !canAgency;
+  // The hub is readable by everyone for this demo; only the composer and the
+  // banner control are gated. See AGENCY_CHANNELS_PUBLIC_READ in core/chat.py.
+  const wallReadable = canAgency || (state.channels && (state.channels.agency || []).length > 0);
+  $('#wall-locked').hidden = wallReadable;
+  $('#wall-panel').hidden = !wallReadable;
+  const bannerCtl = $('.bannerctl');
+  if (bannerCtl) bannerCtl.hidden = !signedIn || !state.session.permissions.includes('banner.publish');
+  const note = $('#wall-readonly');
+  if (note) note.hidden = canAgency;
   $('#ops-locked').hidden = canStatus;
   $('#ops-panel').hidden = !canStatus;
   $('#cards-locked').hidden = canIssue;
@@ -1634,7 +1666,8 @@ function renderStacks(stacks) {
           ${s.witnesses} source${s.witnesses === 1 ? '' : 's'}</span>
       </div>
       ${s.images && s.images.length ? `<div class="thumbs">${s.images
-        .map(u => `<img src="${esc(u)}" alt="Photo" title="Submitted by a resident" loading="lazy">`)
+        .filter(u => safeUrl(u))
+        .map(u => `<img src="${esc(safeUrl(u))}" alt="Photo" title="Submitted by a resident" loading="lazy">`)
         .join('')}</div>` : ''}
     </article>`).join('');
 }
@@ -1657,8 +1690,8 @@ function renderQueue() {
         <span class="at">${esc(i.author_name)} · ${esc(clock(i.at))}</span>
       </div>
       ${i.detail ? `<p class="body">${esc(i.detail)}</p>` : ''}
-      ${i.media_urls && i.media_urls.length
-        ? `<img src="${esc(i.media_urls[0])}" alt="Photo" title="Awaiting review">` : ''}
+      ${i.media_urls && i.media_urls.length && safeUrl(i.media_urls[0])
+        ? `<img src="${esc(safeUrl(i.media_urls[0]))}" alt="Photo" title="Awaiting review">` : ''}
       ${i.url ? `<p class="code">${esc(i.url)}</p>` : ''}
       ${i.contact ? `<p class="at">Contact: ${esc(i.contact)}</p>` : ''}
       ${i.located_by ? `<p class="at">Located by ${esc(i.located_by)}</p>` : ''}
@@ -2160,7 +2193,8 @@ async function renderNews() {
       </div>
       <h3>${esc(n.title)}</h3>
       ${n.body ? `<p class="body">${esc(n.body)}</p>` : ''}
-      ${n.link ? `<p><a href="${esc(n.link)}" rel="noopener noreferrer nofollow"
+      ${safeUrl(n.link) ? `<p><a href="${esc(safeUrl(n.link))}"
+                        rel="noopener noreferrer nofollow"
                         target="_blank">More detail</a></p>` : ''}
     </article>`).join('');
 }

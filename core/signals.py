@@ -16,6 +16,7 @@ Reference: reference/platform_cheatsheet.md, "Signal Schema".
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import datetime, timezone
 
 SEVERITIES = frozenset({"minor", "moderate", "severe", "extreme", "unknown"})
@@ -44,6 +45,33 @@ def idempotency_key(*parts: str) -> str:
     """
     joined = "|".join(str(p) for p in parts)
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:32]
+
+
+# Schemes a browser will execute or inline if it finds them in an href or a
+# src. A link is the one user-supplied value that a browser treats as an
+# instruction rather than as text, so it is validated centrally and every
+# caller that stores one goes through here.
+_SAFE_URL = re.compile(r"^https?://[^\s<>\"\']+$", re.I)
+
+
+def safe_link(url: str | None) -> str | None:
+    """Return the URL if it is a plain http(s) link, else raise.
+
+    `javascript:`, `data:`, `vbscript:` and friends are rejected before
+    storage rather than only before rendering. Escaping an href stops an
+    attribute breakout but does nothing about the scheme — `javascript:alert(1)`
+    contains no character that escaping touches, so it survives intact and
+    runs on click. Rejecting at the boundary means a link that reached the log
+    is already safe, whatever renders it later.
+    """
+    if url is None:
+        return None
+    url = str(url).strip()
+    if not url:
+        return None
+    if not _SAFE_URL.match(url):
+        raise ValueError("links must be a plain http:// or https:// address")
+    return url[:LINK_MAX]
 
 
 def make_signal(

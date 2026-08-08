@@ -28,7 +28,7 @@ the map shows what the council knows as well as what the public reported.
 
 from __future__ import annotations
 
-from .signals import make_signal
+from .signals import make_signal, safe_link
 
 NEWS_TYPE = "news-update"
 REQUEST_TYPE = "help-request"
@@ -252,6 +252,7 @@ class LiveOpsService:
         title = (title or "").strip()[:200]
         if not title:
             raise ValueError("an update needs a headline")
+        link = safe_link(link)
 
         return self.store.publish(make_signal(
             module_id=self.module_id,

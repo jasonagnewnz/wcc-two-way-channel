@@ -69,6 +69,24 @@ PUBLIC_CHANNELS = [
     {"id": "miramar", "name": "Miramar", "short": "Miramar"},
 ]
 
+# DEMO SETTING. With this on, anyone can READ the inter-agency channels —
+# the point of the demo is that a judge can see the whole operating picture
+# without holding a card, and a hub that requires a login to look at is a hub
+# nobody in the room ever sees.
+#
+# What it does NOT relax, deliberately:
+#   - posting still requires `post.agency`, so nobody can put words in an
+#     agency's mouth. That is the control that would actually do harm.
+#   - messages an agency marked officials-only stay private. The seeded
+#     "holding off on a public evacuation message" is exactly the kind of
+#     internal deliberation that should not become public just because the
+#     channel became readable.
+#   - agency traffic still stays out of the raw /api/signals feed, which is
+#     for machine consumption by other teams and carries no context.
+#
+# Set to False for anything that is not a demo.
+AGENCY_CHANNELS_PUBLIC_READ = True
+
 _AGENCY_IDS = {c["id"] for c in AGENCY_CHANNELS}
 _PUBLIC_IDS = {c["id"] for c in PUBLIC_CHANNELS}
 
@@ -270,7 +288,8 @@ class ChatService:
         of being the moderator.
         """
         official = viewer == "official"
-        if channel_kind(channel_id) == "agency" and not official:
+        if (channel_kind(channel_id) == "agency" and not official
+                and not AGENCY_CHANNELS_PUBLIC_READ):
             raise PermissionError("agency channels are not public")
 
         flags = self._flag_state()
@@ -337,8 +356,11 @@ class ChatService:
                     "messages": counts.get(channel["id"], 0),
                     "last_at": latest.get(channel["id"])}
 
-        result = {
+        show_agency = official or AGENCY_CHANNELS_PUBLIC_READ
+        return {
             "public": [decorate(c, "public") for c in PUBLIC_CHANNELS],
-            "agency": [decorate(c, "agency") for c in AGENCY_CHANNELS] if official else [],
+            "agency": [decorate(c, "agency") for c in AGENCY_CHANNELS] if show_agency else [],
+            # So the interface can say "read-only" rather than offering a
+            # composer that will 403.
+            "agency_read_only": show_agency and not official,
         }
-        return result

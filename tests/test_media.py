@@ -240,3 +240,56 @@ class TestMultipart(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestLinkSchemes(unittest.TestCase):
+    """A URL is the one user-supplied value a browser treats as an instruction.
+
+    Escaping an href stops an attribute breakout but does nothing about the
+    scheme: `javascript:alert(1)` contains no character that escaping touches,
+    so it survives intact and runs on click. Caught by an automated review
+    after news links shipped without the check that feeds already had.
+    """
+
+    def test_plain_http_and_https_are_accepted(self):
+        from core.signals import safe_link
+        for url in ("http://example.test/a", "https://example.test",
+                    "https://example.test/a?b=c#d"):
+            self.assertEqual(safe_link(url), url)
+
+    def test_executable_and_inline_schemes_are_refused(self):
+        from core.signals import safe_link
+        for url in ("javascript:alert(1)", "JaVaScRiPt:alert(1)",
+                    "data:text/html,<script>alert(1)</script>",
+                    "vbscript:msgbox", "file:///etc/passwd",
+                    "//evil.test", "ftp://example.test"):
+            with self.assertRaises(ValueError, msg=url):
+                safe_link(url)
+
+    def test_empty_is_none_rather_than_an_error(self):
+        from core.signals import safe_link
+        self.assertIsNone(safe_link(None))
+        self.assertIsNone(safe_link("   "))
+
+    def test_news_refuses_a_dangerous_link_at_the_boundary(self):
+        import tempfile
+        from pathlib import Path as P
+        from core.liveops import LiveOpsService
+        from core.store import SignalStore
+        with tempfile.TemporaryDirectory() as tmp:
+            live = LiveOpsService(SignalStore(P(tmp) / "s.jsonl"))
+            with self.assertRaises(ValueError):
+                live.post_news(title="t", body="b", agency="wcc-em",
+                               category="general", actor="x",
+                               link="javascript:alert(1)")
+
+    def test_feeds_refuse_a_dangerous_link_at_the_boundary(self):
+        import tempfile
+        from pathlib import Path as P
+        from core.community import CommunityService
+        from core.store import SignalStore
+        with tempfile.TemporaryDirectory() as tmp:
+            community = CommunityService(SignalStore(P(tmp) / "s.jsonl"))
+            with self.assertRaises(ValueError):
+                community.add_feed(url="javascript:alert(1)", kind="camera",
+                                   label="x", author_id="a", author_name="A")

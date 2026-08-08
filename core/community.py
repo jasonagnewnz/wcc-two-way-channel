@@ -32,7 +32,7 @@ library would.
 from __future__ import annotations
 
 from .reports import GROUP_RADIUS_M, REPORT_TYPE, haversine_m
-from .signals import make_signal
+from .signals import make_signal, safe_link
 
 RESOURCE_TYPE = "community-resource"
 EVIDENCE_TYPE = "evidence-photo"
@@ -144,6 +144,9 @@ class CommunityService:
                  lng: float | None = None, trusted: bool = False) -> dict:
         if kind not in FEED_KINDS:
             kind = "page"
+        url = safe_link(url)
+        if not url:
+            raise ValueError("a feed needs a link")
         return self.store.publish(make_signal(
             module_id=self.module_id,
             title=(label or FEED_KINDS[kind])[:200],

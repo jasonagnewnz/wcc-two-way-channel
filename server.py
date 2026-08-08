@@ -652,14 +652,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _post_feed(self, body: dict) -> None:
         author_id, author_name, trusted = self._who(body)
+        # Scheme validation lives in core.signals.safe_link so that every
+        # stored link is checked by the same rule, whichever endpoint it
+        # arrives through.
         url = str(body.get("url") or "").strip()
-        # http(s) only. A javascript: or data: URL rendered as a link is a
-        # script somebody else gets to run on this origin.
-        if not re.match(r"^https?://[^\s]+$", url, re.I):
-            return self._error(400, "that needs to be a full http:// or https:// link")
         try:
             item = self.community.add_feed(
-                url=url[:2000], kind=str(body.get("kind") or "page"),
+                url=url, kind=str(body.get("kind") or "page"),
                 label=str(body.get("label") or "")[:200],
                 author_id=author_id, author_name=author_name,
                 lat=_coord(body.get("lat")), lng=_coord(body.get("lng")),
