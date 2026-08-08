@@ -291,6 +291,39 @@ class CardStore:
             self._append(card)
         return code, card
 
+    def plant(self, *, code: str, role: str, holder: str,
+              issued_by: str = "system", note: str = "") -> dict:
+        """Install a card with a KNOWN code, for the published demo cards.
+
+        Separate from issue() and deliberately awkward to reach for: a code
+        somebody chose is only safe when it is meant to be public. Everything
+        else about the record is identical — the plaintext is still never
+        written to disk, only its hash.
+        """
+        if role not in ROLES:
+            raise ValueError(f"unknown role {role!r}")
+        if not code_looks_valid(code):
+            raise ValueError(f"{code!r} is not a well-formed card code")
+
+        card = {
+            "card_id": "CARD-" + hashlib.sha256(
+                normalise(code).encode()).hexdigest()[:8].upper(),
+            "code_hash": hash_code(code),
+            "role": role,
+            "holder": holder.strip()[:80],
+            "issued_by": issued_by,
+            "issued_at": utc_now(),
+            "note": note[:200],
+            "subject": None,
+            "revoked": False,
+            "redeemed_count": 0,
+        }
+        with self._lock:
+            self._cards[card["code_hash"]] = card
+            self._by_id[card["card_id"]] = card
+            self._append(card)
+        return card
+
     def revoke(self, card_id: str, *, by: str = "system") -> dict:
         with self._lock:
             card = self._by_id.get(card_id)

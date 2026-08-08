@@ -188,6 +188,22 @@ def reset(store_path: str | None, *, assume_yes: bool = False) -> int:
     return 0
 
 
+def _seed_demo_cards(store: SignalStore) -> None:
+    """Install the published demo cards unless told not to."""
+    if _SKIP_DEMO_CARDS:
+        print("  Demo cards skipped (--no-demo-cards).")
+        return
+    from demo_cards import seed_demo_cards
+    created = seed_demo_cards(CardStore(), store)
+    if created:
+        print(f"  Seeded {len(created)} PUBLIC demo cards — codes are in DEMO_CARDS.md.")
+        print("  Anyone who reads the repo can sign in with them. Revoke with")
+        print("  `python3 run.py --revoke-demo-cards` if that stops being what you want.")
+
+
+_SKIP_DEMO_CARDS = False
+
+
 def _seed_bootstrap_card(store: SignalStore) -> None:
     """Mint one coordinator card so a fresh clone can demo the official side.
 
@@ -223,12 +239,39 @@ def main(argv: list[str] | None = None) -> int:
                         help="add demo reports and exit without serving")
     parser.add_argument("--reset", action="store_true",
                         help="DELETE every signal, then exit. Use before a demo.")
+    parser.add_argument("--no-demo-cards", action="store_true",
+                        help="seed everything except the published demo cards")
+    parser.add_argument("--seed-demo-cards", action="store_true",
+                        help="install the published demo cards on a running "
+                             "instance without touching any other data, then exit")
+    parser.add_argument("--revoke-demo-cards", action="store_true",
+                        help="cancel the published demo cards and their sessions, then exit")
     parser.add_argument("--issue-card", nargs=2, metavar=("ROLE", "HOLDER"),
                         help="mint an auth card and print it, then exit "
                              f"(roles: {', '.join(ROLES)})")
     parser.add_argument("--yes", action="store_true",
                         help="skip the confirmation prompt on --reset")
     args = parser.parse_args(argv)
+
+    global _SKIP_DEMO_CARDS
+    _SKIP_DEMO_CARDS = args.no_demo_cards
+
+    if args.seed_demo_cards:
+        store = SignalStore(args.store) if args.store else SignalStore()
+        _seed_demo_cards(store)
+        from demo_cards import DEMO_CARDS
+        print()
+        for role, holder, code, _ in DEMO_CARDS:
+            print(f"  {code}   {ROLES[role]['label']:<22} {holder}")
+        print()
+        return 0
+
+    if args.revoke_demo_cards:
+        from demo_cards import revoke_demo_cards
+        store = SignalStore(args.store) if args.store else SignalStore()
+        count = revoke_demo_cards(CardStore(), store)
+        print(f"  Cancelled {count} demo card(s). Anyone signed in with one is signed out.")
+        return 0
 
     if args.issue_card:
         return issue_card(args.issue_card[0], args.issue_card[1], args.store)
@@ -238,6 +281,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.seed or args.seed_only:
         seed(args.store)
+        # Outside seed(), which returns early when the store already has
+        # reports. Nested, the demo cards silently never installed on any
+        # instance that already had data — which is every running one.
+        _seed_demo_cards(SignalStore(args.store) if args.store else SignalStore())
     if args.seed_only:
         return 0
 
