@@ -133,6 +133,12 @@ role and put words in an agency's mouth.
 An emergency cannot depend on an online identity provider. The network is the
 thing that fails. So: **a printed card in a wallet.**
 
+**Want to try the official side right now?** Six working demo cards are
+published in **[DEMO_CARDS.md](DEMO_CARDS.md)** — tap one in the sign-in
+dialog, follow a `?card=` link, or type it. They work on the live instance.
+
+To mint your own:
+
 ```bash
 python3 run.py --issue-card coordinator "Duty Coordinator"
 ```

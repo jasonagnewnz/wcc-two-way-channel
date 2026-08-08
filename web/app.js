@@ -639,6 +639,7 @@ async function boot() {
   initAuth();
   initCards();
   await refreshSession();
+  await signInFromUrl();
   await loadChannels();
   await refreshBanner();
 
@@ -1049,6 +1050,7 @@ function initAuth() {
   $('#signin-btn').addEventListener('click', () => {
     $('#card-code').value = '';
     $('#signin-error').hidden = true;
+    loadDemoCards();
     dialog.showModal();
     $('#card-code').focus();
   });
@@ -1235,4 +1237,66 @@ async function renderCardsView() {
 
   await renderCards();
   await renderTrust();
+}
+
+/* ── one-tap demo cards ──────────────────────────────────────────────────
+ *
+ * The codes are published in the repo, so there is nothing to protect by
+ * making people transcribe them. Signing in to look around should cost one
+ * tap, not a trip to the README and sixteen characters typed by hand.
+ */
+
+async function loadDemoCards() {
+  let cards = [];
+  try { cards = (await api('/api/auth/demo-cards')).cards; } catch (_) { return; }
+
+  const wrap = $('#demo-cards');
+  if (!cards.length) { wrap.hidden = true; return; }
+  wrap.hidden = false;
+
+  const list = $('#demo-card-list');
+  list.textContent = '';
+  for (const card of cards) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'chip';
+    btn.textContent = `${card.label} — ${card.holder}`;
+    btn.title = card.note || '';
+    btn.addEventListener('click', () => signInWith(card.code));
+    list.appendChild(btn);
+  }
+}
+
+async function signInWith(code) {
+  try {
+    const result = await api('/api/auth/redeem', {
+      method: 'POST', body: JSON.stringify({ code }),
+    });
+    saveToken(result.token);
+    state.session = result.session;
+    const dialog = $('#signin-dialog');
+    if (dialog.open) dialog.close();
+    await refreshSession();
+    await refresh(true);
+    return true;
+  } catch (err) {
+    const el = $('#signin-error');
+    el.textContent = err.message;
+    el.hidden = false;
+    return false;
+  }
+}
+
+/** Deep link: /?card=WCC-XXXX-XXXX-XXXX signs in and cleans the URL.
+ *  Lets a card be shared as a link, or a QR code printed on the card itself. */
+async function signInFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('card');
+  if (!code) return;
+  await signInWith(code);
+  // Drop the code from the address bar so it doesn't end up in a screenshot,
+  // a bookmark, or the browser history of a shared laptop.
+  params.delete('card');
+  const rest = params.toString();
+  window.history.replaceState({}, '', window.location.pathname + (rest ? '?' + rest : ''));
 }

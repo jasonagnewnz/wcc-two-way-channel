@@ -374,6 +374,22 @@ class Handler(BaseHTTPRequestHandler):
                           for name, r in ROLES.items()},
             })
 
+        if path == "/api/auth/demo-cards":
+            # Public on purpose: these codes are printed in the repo. Serving
+            # them here as well is what turns signing in from "find the README,
+            # copy a code, type it" into one tap.
+            try:
+                from demo_cards import DEMO_CARDS, DEMO_ISSUER
+            except ImportError:
+                return self._send(200, {"cards": []})
+            live = {c["holder"] for c in self.cards.cards()
+                    if c.get("issued_by") == DEMO_ISSUER and not c.get("revoked")}
+            return self._send(200, {"cards": [
+                {"role": role, "holder": holder, "code": code,
+                 "label": ROLES[role]["label"], "note": note}
+                for role, holder, code, note in DEMO_CARDS if holder in live
+            ]})
+
         if path == "/api/auth/cards":
             if self.require("card.issue") is None:
                 return
