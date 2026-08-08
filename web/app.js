@@ -1483,16 +1483,22 @@ function canonicalPlace(text) {
   return words.join(' ');
 }
 
-/** Fuzzy-match a typed place against the baked gazetteer. */
-function findPlace(query) {
+/** The gazetteer, keyed by canonical name. Built once, but not before the
+ *  basemap has loaded — an empty index must not be cached as the answer. */
+function placeIndex() {
   const places = (state.basemap && state.basemap.places) || [];
-  const q = canonicalPlace(query);
-  if (!q || !places.length) return null;
-
+  if (!places.length) return [];
   if (!state._placeIndex) {
     state._placeIndex = places.map(p => ({ p, key: canonicalPlace(p.n) }));
   }
-  const index = state._placeIndex;
+  return state._placeIndex;
+}
+
+/** Fuzzy-match a typed place against the baked gazetteer. */
+function findPlace(query) {
+  const q = canonicalPlace(query);
+  const index = placeIndex();
+  if (!q || !index.length) return null;
 
   const exact = index.find(e => e.key === q);
   if (exact) return exact.p;
@@ -1502,7 +1508,20 @@ function findPlace(query) {
   return contains ? contains.p : null;
 }
 
+/** Whole name, not a fuzzy prefix — which is what picking from the dropdown
+ *  always gives you, and what a half-typed street never does. */
+function isExactPlace(text) {
+  const q = canonicalPlace(text);
+  return !!q && placeIndex().some(e => e.key === q);
+}
+
 function initNear() {
+  const address = $('#near-address');
+  // The same place can arrive twice — picked from the dropdown, then again
+  // when the box loses focus. Re-filtering to where you already are would
+  // redraw the map for nothing.
+  let applied = '';
+
   const wrap = $('#near-radius');
   wrap.textContent = '';
   for (const km of RADII) {
@@ -1525,6 +1544,9 @@ function initNear() {
     btn.disabled = true; btn.textContent = 'Locating…';
     navigator.geolocation.getCurrentPosition(
       pos => {
+        // Your own position wins over anything left in the box.
+        address.value = '';
+        applied = '';
         saveNear({
           lat: pos.coords.latitude, lng: pos.coords.longitude,
           radius: (state.near && state.near.radius) || 5, label: 'Where you are',
@@ -1533,27 +1555,61 @@ function initNear() {
       },
       () => {
         btn.disabled = false; btn.textContent = 'Near me';
-        $('#near-address').focus();
+        address.focus();
       },
       { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 });
   });
 
-  $('#near-form').addEventListener('submit', event => {
-    event.preventDefault();
-    const place = findPlace($('#near-address').value);
+  function applyPlace(text) {
+    const q = canonicalPlace(text);
+    if (state.near && q === applied) return;
+    const place = findPlace(text);
     if (!place) {
       $('#near-state').textContent = 'No street or suburb by that name';
+      applied = '';
       return;
     }
+    applied = q;
     saveNear({
       lat: place.y, lng: place.x,
       radius: (state.near && state.near.radius) || 5,
       label: place.s ? `${place.n}, ${place.s}` : place.n,
     });
-    $('#near-address').value = '';
+    // The typed place stays in the box on purpose: it is the filter that is
+    // running, and clearing it reads as "that did not work".
+  }
+
+  // Choosing a suburb from the dropdown applies it. Nobody picks from a list
+  // of suggestions and then thinks to press Enter, and until there was a
+  // Search button next to the box there was nothing on screen saying so.
+  //
+  // A pick replaces the whole value in one event; typing arrives a character
+  // at a time. Chrome labels the pick `insertReplacementText`, Firefox and
+  // Safari label it nothing at all, and every ordinary keystroke gets a label
+  // that is neither — so anything else is someone still mid-word.
+  address.addEventListener('input', event => {
+    if (event.inputType && event.inputType !== 'insertReplacementText') return;
+    if (address.value.trim()) applyPlace(address.value);
   });
 
-  $('#near-clear').addEventListener('click', () => saveNear(null));
+  // Belt and braces for a browser that reports the pick only on `change`,
+  // which also fires when the box loses focus. Exact names only, so tabbing
+  // away from a half-typed street cannot quietly move the map somewhere else.
+  address.addEventListener('change', () => {
+    if (isExactPlace(address.value)) applyPlace(address.value);
+  });
+
+  $('#near-form').addEventListener('submit', event => {
+    event.preventDefault();
+    if (!address.value.trim()) return void address.focus();
+    applyPlace(address.value);
+  });
+
+  $('#near-clear').addEventListener('click', () => {
+    address.value = '';
+    applied = '';
+    saveNear(null);
+  });
   renderNear();
 }
 
