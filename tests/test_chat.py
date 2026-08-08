@@ -205,3 +205,70 @@ class TestPosting(Base):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestPublicSignalRedaction(Base):
+    """/api/signals bypasses every service filter, so the boundary is here.
+
+    This class exists because the leak happened twice. First the endpoint had
+    no filter at all and served the private welfare message. Then the filter
+    was written per-type, and help requests arrived carrying
+    `visibility: officials` and went straight through it. The rules are now
+    general, and these tests assert the general property rather than the
+    specific types that were leaking at the time.
+    """
+
+    def test_anything_marked_officials_only_is_withheld_whatever_its_type(self):
+        from core.chat import redact_for_public
+        invented = [
+            {"id": "1", "signal_type": "chat-message", "raw": {"visibility": "officials"}},
+            {"id": "2", "signal_type": "help-request", "raw": {"visibility": "officials"}},
+            {"id": "3", "signal_type": "community-resource", "raw": {"visibility": "officials"}},
+            # A type that does not exist yet. The point of a general rule is
+            # that it covers this one too.
+            {"id": "4", "signal_type": "something-invented-later",
+             "raw": {"visibility": "officials"}},
+            {"id": "5", "signal_type": "community-report", "raw": {"visibility": "public"}},
+        ]
+        kept = {s["id"] for s in redact_for_public(invented)}
+        self.assertEqual(kept, {"5"})
+
+    def test_agency_traffic_is_withheld(self):
+        from core.chat import redact_for_public
+        rows = [{"id": "a", "signal_type": "chat-message",
+                 "raw": {"channel_kind": "agency", "visibility": "public"}}]
+        self.assertEqual(redact_for_public(rows), [])
+
+    def test_unapproved_community_content_is_withheld(self):
+        from core.chat import redact_for_public
+        rows = [
+            {"id": "p", "signal_type": "evidence-photo", "raw": {"state": "pending"}},
+            {"id": "r", "signal_type": "evidence-photo", "raw": {"state": "rejected"}},
+            {"id": "a", "signal_type": "evidence-photo", "raw": {"state": "approved"}},
+        ]
+        self.assertEqual({s["id"] for s in redact_for_public(rows)}, {"a"})
+
+    def test_moderation_and_card_events_are_withheld(self):
+        from core.chat import redact_for_public
+        rows = [{"id": "1", "signal_type": "chat-flag", "raw": {}},
+                {"id": "2", "signal_type": "moderation-decision", "raw": {}},
+                {"id": "3", "signal_type": "card-event", "raw": {}}]
+        self.assertEqual(redact_for_public(rows), [])
+
+    def test_a_contact_detail_is_never_published_even_on_a_public_item(self):
+        from core.chat import redact_for_public
+        rows = [{"id": "1", "signal_type": "community-resource",
+                 "raw": {"visibility": "public", "kind": "water",
+                         "contact": "021 555 0100"}}]
+        kept = redact_for_public(rows)
+        self.assertEqual(len(kept), 1)
+        self.assertNotIn("contact", kept[0]["raw"])
+        self.assertEqual(kept[0]["raw"]["kind"], "water")   # the rest survives
+
+    def test_redaction_does_not_mutate_the_stored_signal(self):
+        from core.chat import redact_for_public
+        original = {"id": "1", "signal_type": "community-resource",
+                    "raw": {"visibility": "public", "contact": "021 555 0100"}}
+        redact_for_public([original])
+        # The log is the audit trail; redaction is a view, never an edit.
+        self.assertIn("contact", original["raw"])

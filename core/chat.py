@@ -88,27 +88,46 @@ def redact_for_public(signals: list[dict]) -> list[dict]:
     """Strip anything a public caller must not see from a raw signal list.
 
     `/api/signals` exposes the append-only log so other teams' modules can read
-    this one. That endpoint bypasses ChatService.messages() entirely, so
-    without this filter it hands out exactly what the board is careful to
-    withhold: private messages, and the whole of the inter-agency channels.
+    this one. That endpoint bypasses every service's read filter, so without
+    this it hands out exactly what the rest of the app is careful to withhold.
 
-    Found by asking the public endpoint for the private welfare message and
-    getting it. The lesson generalises — a filter that lives in one read path
-    is not a rule, it is a coincidence. Any new public read path over this log
-    goes through here.
+    Written as GENERAL RULES rather than a list of known types, because the
+    per-type version was wrong within a day: it knew about chat messages, and
+    then help requests arrived carrying `visibility: officials` and leaked
+    straight through it. Anything marked officials-only is withheld here
+    whatever type it is, so a new private type is safe by default instead of
+    safe only if somebody remembers this function.
     """
     out = []
     for signal in signals:
         raw = signal.get("raw") or {}
-        if signal.get("signal_type") == MESSAGE_TYPE:
-            if raw.get("visibility") == OFFICIALS:
-                continue
-            if raw.get("channel_kind") == "agency":
-                continue
-        # Flag signals carry the moderator's reason and name the message they
-        # act on; that is official business, not public reading.
-        if signal.get("signal_type") == FLAG_TYPE:
+
+        # Rule 1: anything its author marked officials-only. Type-agnostic.
+        if raw.get("visibility") == OFFICIALS:
             continue
+
+        # Rule 2: agency channels are not public at all.
+        if raw.get("channel_kind") == "agency":
+            continue
+
+        # Rule 3: moderation and access decisions are official business —
+        # they name a moderator, carry their reasoning, or describe a card.
+        if signal.get("signal_type") in (FLAG_TYPE, "moderation-decision",
+                                         "card-event"):
+            continue
+
+        # Rule 4: community content that has not been approved yet must not
+        # reach the public through the back door either.
+        if raw.get("state") in ("pending", "rejected"):
+            continue
+
+        # Rule 5: never publish a contact detail, whatever else is public
+        # about the item. Someone offering water publicly did not thereby
+        # publish their phone number.
+        if "contact" in raw:
+            signal = dict(signal)
+            signal["raw"] = {k: v for k, v in raw.items() if k != "contact"}
+
         out.append(signal)
     return out
 
