@@ -41,6 +41,10 @@ from core.community import (
     APPROVED, EVIDENCE_TYPE, FEED_KINDS, FEED_TYPE, PENDING, RESOURCE_KINDS,
     RESOURCE_TYPE, CommunityService,
 )
+from core.liveops import (
+    ISSUE_STATES, ISSUE_TYPE, LIKELIHOOD, NEED_KINDS, REQUEST_TYPE, TIMEFRAME,
+    URGENCY, LiveOpsService,
+)
 from core.media import read_location
 from core.uploads import BadImage, TooLarge, parse_multipart, resolve, store_image
 from core.identity import CardStore, ROLES, can, can_issue, card_event
@@ -76,6 +80,7 @@ class Handler(BaseHTTPRequestHandler):
     chat: ChatService       # injected in serve()
     cards: CardStore        # injected in serve()
     community: CommunityService
+    live: LiveOpsService
     limiter: RateLimiter    # injected in serve()
     promoted: dict          # author_id -> role already auto-granted
 
@@ -217,6 +222,15 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/community/moderate":
             return self._post_moderate(body)
+
+        if path == "/api/live/request":
+            return self._post_request(body)
+
+        if path == "/api/live/issue":
+            return self._post_issue(body)
+
+        if path == "/api/live/update":
+            return self._post_update(body)
 
         match = re.fullmatch(r"/api/reports/([^/]+)/status", path)
         if match:
@@ -403,6 +417,34 @@ class Handler(BaseHTTPRequestHandler):
                 "stacks": self.community.stacks(viewer=viewer),
                 "resource_kinds": RESOURCE_KINDS,
                 "feed_kinds": FEED_KINDS,
+            })
+
+        if path == "/api/live":
+            # One page, everything. Composed here so a single request gives the
+            # whole operating picture rather than the client stitching six.
+            official = can(self.role(), "moderate.flag")
+            viewer = "official" if official else "public"
+            session = self.session()
+            author = (f"card:{session['card_id']}" if session
+                      else query.get("author_id", [None])[0])
+            return self._send(200, {
+                "reports": svc.reports(),
+                "stacks": self.community.stacks(viewer=viewer),
+                "resources": self.community.items(RESOURCE_TYPE, viewer=viewer,
+                                                  author_id=author),
+                "evidence": self.community.items(EVIDENCE_TYPE, viewer=viewer,
+                                                 author_id=author),
+                "feeds": self.community.items(FEED_TYPE, viewer=viewer,
+                                              author_id=author),
+                "requests": self.live.requests(viewer=viewer, author_id=author),
+                "issues": self.live.issues(),
+                "banner": self.chat.banner(),
+                "vocab": {
+                    "needs": NEED_KINDS, "urgency": URGENCY,
+                    "likelihood": LIKELIHOOD, "timeframe": TIMEFRAME,
+                    "issue_states": ISSUE_STATES,
+                },
+                "official_view": official,
             })
 
         if path == "/api/community/queue":
@@ -680,6 +722,73 @@ class Handler(BaseHTTPRequestHandler):
             "metadata_stripped": stored["stripped"],
         })
 
+    # -- live ops ----------------------------------------------------------
+
+    def _post_request(self, body: dict) -> None:
+        author_id, author_name, _ = self._who(body)
+        if not author_id:
+            return self._error(400, "missing author_id")
+        detail = str(body.get("detail") or "").strip()
+        if len(detail) < 10:
+            return self._error(
+                400, "tell us a bit about what you need, so someone can act on it")
+        try:
+            people = int(body.get("people")) if body.get("people") else None
+        except (TypeError, ValueError):
+            people = None
+        try:
+            item = self.live.request_help(
+                need=str(body.get("need") or "other"), detail=detail,
+                author_id=author_id, author_name=author_name,
+                urgency=str(body.get("urgency") or "today"),
+                people=people,
+                lat=_coord(body.get("lat")), lng=_coord(body.get("lng")),
+                place_name=(str(body.get("place_name"))[:200]
+                            if body.get("place_name") else None),
+                contact=(str(body.get("contact"))[:120] if body.get("contact") else None),
+                visibility=str(body.get("visibility") or "officials"))
+        except StoreFull as exc:
+            return self._error(503, str(exc))
+        return self._send(201, {"ok": True, "id": item["id"]})
+
+    def _post_issue(self, body: dict) -> None:
+        session = self.require("report.status")
+        if session is None:
+            return
+        title = str(body.get("title") or "").strip()
+        if not title:
+            return self._error(400, "the issue needs a title")
+        try:
+            item = self.live.publish_issue(
+                title=title, detail=str(body.get("detail") or ""),
+                actor=session["holder"],
+                state=str(body.get("state") or "active"),
+                lat=_coord(body.get("lat")), lng=_coord(body.get("lng")),
+                place_name=(str(body.get("place_name"))[:200]
+                            if body.get("place_name") else None),
+                severity=(body.get("severity")
+                          if body.get("severity") in SEVERITIES else "moderate"))
+        except StoreFull as exc:
+            return self._error(503, str(exc))
+        return self._send(201, {"ok": True, "id": item["id"]})
+
+    def _post_update(self, body: dict) -> None:
+        session = self.require("report.status")
+        if session is None:
+            return
+        try:
+            self.live.post_update(
+                str(body.get("target_id") or ""),
+                likelihood=str(body.get("likelihood") or ""),
+                timeframe=str(body.get("timeframe") or ""),
+                note=str(body.get("note") or ""),
+                actor=session["holder"])
+        except KeyError:
+            return self._error(404, "nothing with that id to update")
+        except ValueError as exc:
+            return self._error(400, str(exc))
+        return self._send(201, {"ok": True})
+
     # -- auth --------------------------------------------------------------
 
     def _post_redeem(self, body: dict) -> None:
@@ -837,6 +946,7 @@ def serve(host: str = "127.0.0.1", port: int = 8080,
         "service": service,
         "chat": ChatService(store),
         "community": CommunityService(store),
+        "live": LiveOpsService(store),
         "cards": cards,
         "limiter": RateLimiter(),
         "promoted": {},

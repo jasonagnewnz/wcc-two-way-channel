@@ -22,7 +22,8 @@
     </div>
   </div>
   <nav class="tabs" role="tablist">
-    <button class="tab is-active" data-view="report" role="tab">Report an issue</button>
+    <button class="tab is-active" data-view="live" role="tab">Live map</button>
+    <button class="tab" data-view="report" role="tab">Report an issue</button>
     <button class="tab" data-view="mine" role="tab">My reports <span class="pill" id="mine-count" hidden></span></button>
     <button class="tab" data-view="board" role="tab">Message board</button>
     <button class="tab" data-view="ops" role="tab">WCC view</button>
@@ -101,8 +102,71 @@
 
 <main>
 
+  <!-- ── Live map: one page, everything happening ───────────── -->
+  <section class="view is-active" id="view-live">
+    <div class="split live">
+      <div class="mapwrap card">
+        <div class="maphead">
+          <h1>Wellington right now</h1>
+          <span class="counter" id="live-counter"></span>
+        </div>
+        <div class="layers" id="live-layers"></div>
+        <div id="map-live" class="map tall"></div>
+        <p class="attrib">
+          Everything on one map: what people reported, what they photographed,
+          what they are asking for, what they can offer, and what WCC has
+          confirmed. Bigger circles mean more people saw the same thing.
+        </p>
+      </div>
+
+      <div class="card scroller">
+        <h2>Happening now</h2>
+        <p class="hint" id="live-scope">Newest first, across the whole city.</p>
+        <div id="live-feed" class="stack"></div>
+      </div>
+    </div>
+
+    <div class="split live-forms">
+      <form class="card" id="help-form">
+        <h2>Ask for help</h2>
+        <p class="hint">
+          Different from reporting a problem — this is you or someone near you
+          needing something. It goes to WCC, and they answer two things: whether
+          someone is coming, and roughly when.
+        </p>
+        <fieldset><legend>What's needed</legend><div class="chips" id="need-kinds"></div></fieldset>
+        <fieldset><legend>How urgent</legend><div class="chips" id="need-urgency"></div></fieldset>
+        <textarea id="help-detail" rows="3" maxlength="1000"
+                  placeholder="What is needed, and anything that would stop someone reaching you"></textarea>
+        <div class="row">
+          <input id="help-place" maxlength="120" placeholder="Street or suburb">
+          <input id="help-people" type="number" min="1" max="99" placeholder="People">
+        </div>
+        <input id="help-contact" maxlength="120" placeholder="How to reach you (officials only)">
+        <fieldset><legend>Who can see this</legend><div class="chips" id="help-visibility"></div></fieldset>
+        <button class="btn primary" type="submit">Send request</button>
+        <p class="error" id="help-error" hidden></p>
+        <p class="ok" id="help-ok" hidden></p>
+      </form>
+
+      <form class="card" id="issue-form" hidden>
+        <h2>Publish an issue</h2>
+        <p class="hint">
+          WCC confirming something itself, so the map shows what the council
+          knows as well as what the public reported.
+        </p>
+        <input id="issue-title" maxlength="200" placeholder="e.g. Hutt Road southbound lane closed">
+        <textarea id="issue-detail" rows="3" maxlength="1000" placeholder="What people need to know"></textarea>
+        <input id="issue-place" maxlength="120" placeholder="Street or suburb">
+        <fieldset><legend>State</legend><div class="chips" id="issue-states"></div></fieldset>
+        <button class="btn primary" type="submit">Publish</button>
+        <p class="error" id="issue-error" hidden></p>
+      </form>
+    </div>
+  </section>
+
   <!-- ── Report ─────────────────────────────────────────────── -->
-  <section class="view is-active" id="view-report">
+  <section class="view" id="view-report">
     <div class="split">
       <form id="report-form" class="card" autocomplete="off">
         <h1>What's happening?</h1>

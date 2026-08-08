@@ -120,6 +120,7 @@ def seed_chat(store: SignalStore) -> None:
         chat.flag(last_newtown, reason=demo_data.FLAG_LAST_NEWTOWN_REASON,
                   actor="wcc-moderator")
 
+    _seed_live(store)
     _seed_bootstrap_card(store)
 
     agency_count = len(demo_data.AGENCY_MESSAGES)
@@ -186,6 +187,36 @@ def reset(store_path: str | None, *, assume_yes: bool = False) -> int:
     discarded = store.reset()
     print(f"  Deleted {discarded} signals. Log is empty.\n")
     return 0
+
+
+def _seed_live(store: SignalStore) -> None:
+    """Published issues, requests for help, and WCC's answers to some of them."""
+    import demo_data
+    from core.liveops import LiveOpsService
+
+    live = LiveOpsService(store)
+
+    for title, detail, state, place, lat, lng, severity in demo_data.PUBLISHED_ISSUES:
+        live.publish_issue(title=title, detail=detail, actor="Duty Controller",
+                           state=state, lat=lat, lng=lng, place_name=place,
+                           severity=severity)
+
+    requests = []
+    for need, detail, urgency, place, lat, lng, people, visibility, who in demo_data.HELP_REQUESTS:
+        requests.append(live.request_help(
+            need=need, detail=detail, urgency=urgency, place_name=place,
+            lat=lat, lng=lng, people=people, visibility=visibility,
+            author_id=f"demo-{who.lower().replace(' ', '-')}", author_name=who))
+
+    # Deliberately not every request. One waiting with no answer is the honest
+    # state of a real board, and it is what makes the answered ones mean
+    # something.
+    for index, likelihood, timeframe, note in demo_data.RESPONSES:
+        live.post_update(requests[index]["id"], likelihood=likelihood,
+                         timeframe=timeframe, note=note, actor="Duty Controller")
+
+    print(f"  seeded {len(demo_data.PUBLISHED_ISSUES)} published issues, "
+          f"{len(requests)} help requests, {len(demo_data.RESPONSES)} WCC responses")
 
 
 def _seed_demo_cards(store: SignalStore) -> None:

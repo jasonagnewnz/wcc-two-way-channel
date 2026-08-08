@@ -18,7 +18,7 @@ const state = {
   basemap: null,
   reports: [],
   cursor: 0,
-  view: 'report',
+  view: 'live',
   draft: { issue_type: 'flooding', severity: 'unknown', reporter_kind: 'resident',
            lat: null, lng: null },
   mine: [],          // reference codes held on this device
@@ -31,6 +31,8 @@ const state = {
   near: null,        // {lat,lng,radius,label} — this browser only, never sent
   community: null,
   queue: null,
+  live: null,
+  layers: {},
   token: null,       // session token from a redeemed card
   session: null,     // {role, holder, permissions} — decided by the server
   roles: {},
@@ -307,6 +309,7 @@ function showView(name) {
   if (name === 'wall') renderWall();
   if (name === 'cards') renderCardsView();
   if (name === 'community') renderCommunity().then(fillCommunityChips);
+  if (name === 'live') renderLive();
 }
 
 // ── report form ──────────────────────────────────────────────────────────
@@ -622,6 +625,7 @@ async function refresh(force = false) {
     if (state.view === 'wall') renderWall();
     if (state.view === 'cards') renderCardsView();
     if (state.view === 'community') renderCommunity();
+    if (state.view === 'live') renderLive();
   } catch (_) {
     // Offline or the server restarted. Keep the last good render on screen
     // and try again on the next tick rather than blanking the page.
@@ -648,6 +652,7 @@ async function boot() {
   initWall();
   initNear();
   initCommunity();
+  initLive();
   initAuth();
   initCards();
   await refreshSession();
@@ -679,6 +684,7 @@ async function boot() {
     $('#attrib').textContent = 'Basemap unavailable — run tools/fetch_basemap.py.';
   }
 
+  await renderLive();
   await refresh(true);
   setInterval(refresh, 3000);
 }
@@ -1345,6 +1351,7 @@ function saveNear(near) {
   } catch (_) {}
   renderNear();
   if (state.view === 'ops') renderOps();
+  if (state.view === 'live') renderLive();
   if (state.view === 'report' && reportMap) drawNearRing(reportMap);
 }
 
@@ -1775,5 +1782,278 @@ function fillCommunityChips() {
             'feedKind', c.feed_kinds || {});
   chipGroup($('#resource-visibility'), ['public', 'officials'], 'resourceVisibility', {
     public: 'Anyone can see this', officials: 'Only officials (address, contact)',
+  });
+}
+
+/* ── the live map: one page, everything ──────────────────────────────────
+ *
+ * Reports, photos, requests for help, offers, feeds and WCC's own published
+ * issues on one Wellington map, with a feed beside it. Composed server-side
+ * into a single /api/live response so the whole picture arrives in one
+ * request instead of the client stitching six together.
+ */
+
+let liveMap = null;
+
+const LAYERS = [
+  { key: 'issues',    label: 'WCC issues',   colour: 'var(--responding)' },
+  { key: 'requests',  label: 'Help needed',  colour: '#d64545' },
+  { key: 'stacks',    label: 'Reports & photos', colour: 'var(--accent)' },
+  { key: 'resources', label: 'Offers of help', colour: 'var(--resolved)' },
+  { key: 'feeds',     label: 'Live feeds',   colour: '#7a4bd0' },
+];
+
+function initLive() {
+  state.layers = Object.fromEntries(LAYERS.map(l => [l.key, true]));
+
+  const wrap = $('#live-layers');
+  wrap.textContent = '';
+  for (const layer of LAYERS) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip';
+    chip.setAttribute('aria-pressed', 'true');
+    chip.innerHTML = `<i style="background:${layer.colour}"></i>${esc(layer.label)}`;
+    chip.addEventListener('click', () => {
+      state.layers[layer.key] = !state.layers[layer.key];
+      chip.setAttribute('aria-pressed', String(state.layers[layer.key]));
+      renderLive();
+    });
+    wrap.appendChild(chip);
+  }
+
+  $('#help-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const detail = $('#help-detail').value.trim();
+    if (detail.length < 10) {
+      return showError('#help-error', 'Tell us a bit about what you need.');
+    }
+    try {
+      await api('/api/live/request', {
+        method: 'POST',
+        body: JSON.stringify({
+          need: state.draft.need, urgency: state.draft.urgency, detail,
+          place_name: $('#help-place').value.trim(),
+          people: $('#help-people').value || null,
+          contact: $('#help-contact').value.trim(),
+          visibility: state.draft.helpVisibility,
+          author_id: state.authorId,
+          author_name: state.displayName || 'Anonymous',
+          lat: state.near ? state.near.lat : null,
+          lng: state.near ? state.near.lng : null,
+        }),
+      });
+      $('#help-form').reset();
+      const ok = $('#help-ok');
+      ok.textContent = 'Sent. WCC will answer whether someone is coming, and roughly when — it appears here.';
+      ok.hidden = false;
+      setTimeout(() => { ok.hidden = true; }, 9000);
+      await renderLive();
+    } catch (err) { showError('#help-error', err.message); }
+  });
+
+  $('#issue-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const title = $('#issue-title').value.trim();
+    if (!title) return showError('#issue-error', 'Give the issue a title.');
+    try {
+      await api('/api/live/issue', {
+        method: 'POST',
+        body: JSON.stringify({
+          title, detail: $('#issue-detail').value.trim(),
+          place_name: $('#issue-place').value.trim(),
+          state: state.draft.issueState,
+          lat: state.near ? state.near.lat : null,
+          lng: state.near ? state.near.lng : null,
+        }),
+      });
+      $('#issue-form').reset();
+      await renderLive();
+    } catch (err) { showError('#issue-error', err.message); }
+  });
+}
+
+async function renderLive() {
+  let data;
+  try {
+    const params = new URLSearchParams({ author_id: state.authorId });
+    data = await api('/api/live?' + params);
+  } catch (_) { return; }
+  state.live = data;
+
+  if (!liveMap) {
+    liveMap = new Map($('#map-live'), state.meta.extent);
+    if (state.basemap) liveMap.drawBasemap(state.basemap);
+  }
+
+  // Vocabularies arrive with the data, so the chips cannot drift from what
+  // the server will accept.
+  if (!state.draft.need) {
+    state.draft.need = 'welfare';
+    state.draft.urgency = 'today';
+    state.draft.helpVisibility = 'officials';
+    state.draft.issueState = 'active';
+    chipGroup($('#need-kinds'), Object.keys(data.vocab.needs), 'need', data.vocab.needs);
+    chipGroup($('#need-urgency'), Object.keys(data.vocab.urgency), 'urgency', data.vocab.urgency);
+    chipGroup($('#issue-states'), Object.keys(data.vocab.issue_states), 'issueState',
+              data.vocab.issue_states);
+    chipGroup($('#help-visibility'), ['officials', 'public'], 'helpVisibility', {
+      officials: 'Only WCC and responders', public: 'Neighbours too — someone nearby may be closer',
+    });
+  }
+
+  $('#issue-form').hidden = !data.official_view;
+
+  drawLivePins(data);
+  renderLiveFeed(data);
+}
+
+function drawLivePins(data) {
+  const layer = liveMap.layers.pins;
+  layer.textContent = '';
+  drawNearRing(liveMap);
+
+  const add = (item, cls, radius, label) => {
+    if (item.lat == null || item.lng == null) return;
+    const el = document.createElementNS(SVG_NS, 'circle');
+    el.setAttribute('cx', liveMap.x(item.lng).toFixed(1));
+    el.setAttribute('cy', liveMap.y(item.lat).toFixed(1));
+    el.setAttribute('r', String(radius));
+    el.setAttribute('class', cls + (withinNear(item) ? '' : ' is-far'));
+    const t = document.createElementNS(SVG_NS, 'title');
+    t.textContent = label;
+    el.appendChild(t);
+    layer.appendChild(el);
+  };
+
+  if (state.layers.stacks) {
+    for (const s of data.stacks || []) {
+      add(s, 'stackpin', Math.min(6 + s.pieces * 3, 22),
+          `${s.title} — ${s.pieces} piece(s) from ${s.witnesses} source(s)`);
+    }
+  }
+  if (state.layers.resources) {
+    for (const r of data.resources || []) add(r, 'res', 5, r.title);
+  }
+  if (state.layers.feeds) {
+    for (const f of data.feeds || []) add(f, 'feedpin', 5, `${f.title} — live feed`);
+  }
+  if (state.layers.issues) {
+    for (const i of data.issues || []) {
+      add(i, 'issuepin', 8, `WCC: ${i.title} — ${i.state_label}`);
+    }
+  }
+  if (state.layers.requests) {
+    for (const r of data.requests || []) {
+      add(r, 'reqpin' + (r.urgency === 'now' ? ' is-urgent' : ''), 7,
+          `Help needed: ${r.title} — ${r.likelihood_label}`);
+    }
+  }
+}
+
+/** One chronological feed across every type — the "what is going on" column. */
+function renderLiveFeed(data) {
+  const rows = [];
+
+  for (const i of data.issues || []) {
+    rows.push({ kind: 'issue', at: i.at, item: i,
+                label: 'WCC issue', title: i.title, body: i.detail });
+  }
+  for (const r of data.requests || []) {
+    rows.push({ kind: 'request', at: r.at, item: r,
+                label: 'Help needed', title: r.title, body: r.detail });
+  }
+  for (const s of data.stacks || []) {
+    rows.push({ kind: 'report', at: null, item: s,
+                label: `${s.pieces} piece${s.pieces === 1 ? '' : 's'} of evidence`,
+                title: s.title,
+                body: `${s.reports} report(s) · ${s.photos} photo(s) · ${s.witnesses} source(s)` });
+  }
+  for (const r of data.resources || []) {
+    rows.push({ kind: 'resource', at: r.at, item: r,
+                label: 'Offered', title: r.title, body: r.detail });
+  }
+  for (const f of data.feeds || []) {
+    rows.push({ kind: 'feed', at: f.at, item: f,
+                label: 'Live feed', title: f.title, body: f.url || '' });
+  }
+
+  const visible = rows
+    .filter(r => state.layers[({ issue: 'issues', request: 'requests', report: 'stacks',
+                                resource: 'resources', feed: 'feeds' })[r.kind]])
+    .filter(r => withinNear(r.item))
+    .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+
+  $('#live-counter').textContent =
+    `${visible.length} thing${visible.length === 1 ? '' : 's'} happening`;
+  $('#live-scope').textContent = state.near
+    ? `Newest first, within ${state.near.radius} km of ${state.near.label}.`
+    : 'Newest first, across the whole city.';
+
+  const feed = $('#live-feed');
+  if (!visible.length) {
+    feed.innerHTML = '<p class="empty">Nothing here yet.</p>';
+    return;
+  }
+
+  feed.innerHTML = visible.map(r => `
+    <article class="liverow k-${esc(r.kind)}">
+      <div class="head">
+        <span class="kind">${esc(r.label)}</span>
+        ${r.at ? `<span class="at">${esc(ago(r.at))}</span>` : ''}
+        ${r.item.place_name ? `<span class="at">· ${esc(r.item.place_name)}</span>` : ''}
+      </div>
+      <h4>${esc(r.title || '')}</h4>
+      ${r.body ? `<p class="body">${esc(r.body)}</p>` : ''}
+      ${r.kind === 'request' || r.kind === 'issue' ? answerHtml(r.item, data) : ''}
+    </article>`).join('');
+
+  wireResponders(data);
+}
+
+/** WCC's answer to a request: are we coming, and roughly when. */
+function answerHtml(item, data) {
+  const waiting = !item.likelihood_label || item.likelihood_label === 'Waiting for WCC';
+  const cls = waiting ? 'a-waiting' : `a-${esc(item.likelihood || '')}`;
+  let html = `
+    <div class="answer ${cls}">
+      <span class="lk">${esc(item.likelihood_label || 'Waiting for WCC')}</span>
+      ${item.timeframe_label ? `<span>${esc(item.timeframe_label)}</span>` : ''}
+      ${item.timeline && item.timeline.length
+        ? `<span class="at">${esc(item.timeline[item.timeline.length - 1].actor || '')}</span>` : ''}
+    </div>`;
+
+  if (data.official_view) {
+    html += `
+      <div class="respond" data-target="${esc(item.id)}">
+        <select data-role="likelihood">${Object.entries(data.vocab.likelihood)
+          .map(([k, v]) => `<option value="${esc(k)}">${esc(v)}</option>`).join('')}</select>
+        <select data-role="timeframe">${Object.entries(data.vocab.timeframe)
+          .map(([k, v]) => `<option value="${esc(k)}">${esc(v)}</option>`).join('')}</select>
+        <input data-role="note" placeholder="Anything useful" maxlength="200">
+        <button class="btn tiny" data-role="send">Update</button>
+      </div>`;
+  }
+  return html;
+}
+
+function wireResponders(data) {
+  $$('.respond').forEach(box => {
+    const btn = box.querySelector('[data-role="send"]');
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        await api('/api/live/update', {
+          method: 'POST',
+          body: JSON.stringify({
+            target_id: box.dataset.target,
+            likelihood: box.querySelector('[data-role="likelihood"]').value,
+            timeframe: box.querySelector('[data-role="timeframe"]').value,
+            note: box.querySelector('[data-role="note"]').value.trim(),
+          }),
+        });
+        await renderLive();
+      } catch (err) { alert(err.message); btn.disabled = false; }
+    });
   });
 }

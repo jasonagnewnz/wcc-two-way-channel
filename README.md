@@ -28,6 +28,40 @@ is no time for that.
 `--seed` puts six plausible Wellington reports on the map so there is something
 to look at. Leave it off for an empty slate.
 
+### The Live map
+
+The landing page is one Wellington map with everything on it: what people
+reported, what they photographed, what they are asking for, what they can
+offer, what live feeds exist, and what WCC has confirmed itself. Layers toggle;
+the near-me filter applies; a feed beside it lists it all newest-first.
+
+**A request for help is not a report.** "There is water over the road" and "I
+need help getting my father out" are different messages with different
+urgency, and flattening them into one queue buries the second. So a request is
+its own type, with who needs help, how many people, and what would stop
+someone reaching them. It defaults to **officials-only** visibility — a
+request says a named person at a known address is vulnerable right now — but
+the asker can make it public, because a neighbour two streets away is often
+the fastest responder.
+
+**An honest answer is not the same as a fast one.** WCC answers two separate
+questions:
+
+| | |
+|---|---|
+| **Likelihood** | Confirmed · Likely · Unlikely · **We can't get to this** |
+| **Timeframe** | Within the hour · Today · Within 24 hours · No time yet |
+
+Kept separate on purpose. "Likely, but not before tomorrow" and "confirmed,
+within the hour" are both useful; one blended field expresses neither. And
+`unable` is a first-class answer with a reason attached, because during a real
+event it is sometimes the true one — and saying it early lets a neighbour step
+in instead of everyone waiting.
+
+Updates chain to the request rather than replacing its status, so the whole
+sequence of answers survives, including the ones that turned out to be wrong.
+That is the part an after-action review actually needs.
+
 ### See the loop in thirty seconds
 
 1. **Report an issue** — pick a type, write a line, tap the map, send.

@@ -120,3 +120,45 @@ BANNER = {
 # moderation looks like: it leaves the public feed, a visible marker stays, and
 # the flag itself is a signal in the log. Nothing disappears without trace.
 FLAG_LAST_NEWTOWN_REASON = "Off-topic for an emergency board — moved out of the public feed, not deleted."
+
+
+# --- live map: what WCC has published, and what people are asking for ------
+# All invented, same scenario as everything else.
+
+# (title, detail, state, place, lat, lng, severity)
+PUBLISHED_ISSUES = [
+    ("Hutt Road southbound lane closed at Ngauranga",
+     "Surface flooding. Contractor on site with traffic management. Northbound is open but slow.",
+     "active", "Ngauranga", -41.2432, 174.8100, "severe"),
+    ("Wadestown Road footpath blocked by a slip",
+     "Footpath only at this stage; the road remains open. Being reassessed after the next band of rain.",
+     "monitoring", "Wadestown", -41.2660, 174.7710, "moderate"),
+    ("Aro Valley power outage",
+     "Lines company advises a fault affecting about 400 properties. The community hub is open with a generator.",
+     "active", "Aro Valley", -41.2950, 174.7690, "moderate"),
+]
+
+# (need, detail, urgency, place, lat, lng, people, visibility, author)
+HELP_REQUESTS = [
+    ("evacuation",
+     "Ground floor flat is taking water. My father uses a walker and can't manage the front step. "
+     "Back gate is the easier way in.",
+     "now", "Island Bay", -41.3110, 174.7810, 2, "officials", "Community Group"),
+    ("welfare",
+     "Elderly neighbour two doors down hasn't answered since the power went out. She usually has her light on.",
+     "today", "Aro Valley", -41.2948, 174.7695, 1, "public", "Tama"),
+    ("water",
+     "No water at our place since about 3pm. Two small kids. Happy to walk somewhere if there's a tap.",
+     "today", "Karori", -41.2857, 174.7370, 4, "public", "Sam"),
+    ("access",
+     "Tree across the driveway, can't get the car out. Not urgent but we're due at an appointment tomorrow.",
+     "soon", "Newtown", -41.3050, 174.7780, 2, "public", "Jo"),
+]
+
+# (target index into HELP_REQUESTS, likelihood, timeframe, note)
+RESPONSES = [
+    (0, "confirmed", "within-hour", "Free Ambulance crew assigned, coming via the back gate as advised."),
+    (2, "likely", "today", "Water tanker heading to the Karori hub. We'll post the location here once it's set up."),
+    (3, "unlikely", "no-eta", "Contractors are committed to road closures tonight. If it's safe to leave the car, "
+                              "we'd suggest that — we'll get to this once the weather eases."),
+]
