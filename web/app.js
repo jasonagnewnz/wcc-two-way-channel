@@ -500,6 +500,10 @@ async function renderMine() {
   list.innerHTML = views.filter(Boolean).map(view => {
     const r = view.report;
     const status = view.status || 'received';
+    // One conversation, both voices: what WCC said and what the reporter
+    // said back, in the order it happened.
+    const convo = view.conversation && view.conversation.length
+      ? view.conversation : view.timeline;
     return `
       <article class="report s-${esc(status)}">
         <div class="meta">
@@ -511,15 +515,37 @@ async function renderMine() {
         ${r.description ? `<p class="body">${esc(r.description)}</p>` : ''}
         ${view.hazard_summary ? `<p class="body"><em>${esc(view.hazard_summary)}</em></p>` : ''}
         <ol class="timeline">
-          ${view.timeline.map((t, i) => `
-            <li class="${i === view.timeline.length - 1 ? 'now' : ''}">
+          ${convo.map((t, i) => `
+            <li class="${i === convo.length - 1 ? 'now' : ''} ${t.who === 'reporter' ? 'from-reporter' : ''} ${t.urgent ? 'is-urgent' : ''}">
               <strong>${esc(t.label)}</strong>
-              <span class="when">${esc(clock(t.at))} · ${esc(t.actor)}</span>
+              <span class="when">${esc(clock(t.at))} · ${esc(t.actor || 'WCC')}</span>
               ${t.note ? `<span class="note">${esc(t.note)}</span>` : ''}
             </li>`).join('')}
         </ol>
+        <div class="taps" data-followup="${esc(r.id)}">
+          <span class="at" style="flex-basis:100%">Anything changed? Tell WCC — it updates their picture.</span>
+          ${Object.entries(view.followup_kinds || {}).map(([k, label]) =>
+            `<button class="btn tiny ghost" data-kind="${esc(k)}">${esc(label)}</button>`).join('')}
+        </div>
       </article>`;
   }).join('');
+
+  $$('[data-followup]').forEach(box => {
+    $$('[data-kind]', box).forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const note = prompt(`${btn.textContent.trim()} — anything to add? (optional)`) || '';
+        btn.disabled = true;
+        try {
+          await api(`/api/reports/${box.dataset.followup}/followup`, {
+            method: 'POST',
+            body: JSON.stringify({ kind: btn.dataset.kind, note,
+                                   author_id: state.authorId }),
+          });
+          await renderMine();
+        } catch (err) { showError('#lookup-error', err.message); btn.disabled = false; }
+      });
+    });
+  });
 }
 
 function initLookup() {
@@ -580,9 +606,11 @@ function renderOps() {
     const status = r.status || 'received';
     const related = groupLabel(r.group_id, state.reports);
     return `
-      <article class="report s-${esc(status)}" id="ops-${esc(r.id)}">
+      <article class="report s-${esc(status)} ${r.needs_attention ? 'needs-attention' : ''}" id="ops-${esc(r.id)}">
         <div class="meta">
           <span class="badge b-${esc(status)}">${esc(r.status_label)}</span>
+          ${r.needs_attention ? '<span class="tag t-flagged">Reporter says it is getting worse</span>' : ''}
+          ${(r.followups || []).length ? `<span class="grouptag">${r.followups.length} update${r.followups.length === 1 ? '' : 's'} from the reporter</span>` : ''}
           ${related ? `<span class="grouptag">${esc(related)}</span>` : ''}
           <span class="code">${esc(r.id)}</span>
           <span>${esc(ago(r.created_at))}</span>

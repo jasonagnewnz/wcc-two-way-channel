@@ -771,3 +771,127 @@ footer a { display: inline-flex; align-items: center; min-height: 32px; padding:
 .faq dt { font-weight: 600; color: var(--ink); margin-top: 12px; font-size: .9rem; }
 .faq dd { margin: 4px 0 0; padding-left: 12px; border-left: 2px solid var(--line); }
 .links a { font-size: .87rem; }
+
+/* ═══════════════════════════════════════════════════════════
+   DESIGN PASS — "situation board"
+
+   The reference is not a consumer app; it is the wall of an emergency
+   operations centre. Wellington's own emergency vernacular is colour-banded
+   evacuation zones, hazard signage and radio-log discipline, so that is what
+   this borrows: coloured severity rails, monospace eyebrows in the register
+   of a call sign, and a working surface rather than a marketing surface.
+
+   The accent moves off generic tech-blue to a deep HARBOUR TEAL. Wellington
+   is a harbour city, the colour belongs to the subject rather than to
+   software, and it separates cleanly from the red/orange/yellow that
+   evacuation zoning has already spoken for — which mattered, because on this
+   map blue must never read as a hazard grade.
+
+   No web fonts: a CDN font is the same single point of failure as a CDN map,
+   and this has to work on a dead network. So personality comes from
+   treatment — weight contrast, tight display tracking, and wide-tracked
+   monospace eyebrows — not from a typeface nobody can download.
+   ═══════════════════════════════════════════════════════════ */
+
+:root {
+  --accent:      #0a5f6b;   /* harbour teal */
+  --accent-ink:  #ffffff;
+  --responding:  #0a5f6b;
+  --ink:         #101a21;
+  --paper:       #eef2f4;
+  --line:        #dbe3e6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent:     #4fc3d4;
+    --accent-ink: #05222a;
+    --responding: #4fc3d4;
+    --ink:        #e6eef1;
+    --paper:      #0a1216;
+    --card:       #111d23;
+    --line:       #22343c;
+    --sea:        #0d1a21;
+  }
+}
+
+/* ── type scale ─────────────────────────────────────────────
+   Three registers: display (tight, heavy), body (plain), and a
+   wide-tracked monospace eyebrow that carries the operational voice. */
+
+h1 { letter-spacing: -.022em; font-weight: 700; }
+h2 { letter-spacing: -.014em; font-weight: 650; }
+h3, h4 { letter-spacing: -.008em; }
+
+.kind, .cb-tag, .pc-head, .tabgroup, .src, .tag {
+  font-family: var(--mono);
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+
+/* Nav: the public journey, then a rule, then operations. Nine flat tabs
+   asked the reader to work out which side of the product they were on. */
+.tabsplit {
+  flex: 0 0 auto; width: 1px; align-self: stretch;
+  background: var(--line); margin: 0 6px;
+}
+.tabgroup {
+  flex: 0 0 auto; align-self: center;
+  font-size: .62rem; color: var(--ink-3); padding-right: 2px;
+}
+@media (max-width: 900px) { .tabgroup { display: none; } }
+
+/* ── the signature: severity spine ──────────────────────────
+   The live feed reads down a single rail, each entry pegged to it by a node
+   coloured for what it is. It is the shape of an operations log, and it makes
+   "what is going on right now" scannable in one vertical movement instead of
+   card by card. */
+
+#live-feed {
+  position: relative;
+  padding-left: 22px;
+  gap: 14px;
+}
+#live-feed::before {
+  content: "";
+  position: absolute; left: 6px; top: 6px; bottom: 6px;
+  width: 2px; border-radius: 2px;
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--ink-3) 34%, transparent),
+    color-mix(in srgb, var(--ink-3) 6%, transparent));
+}
+#live-feed .liverow { position: relative; border-left-width: 1px; }
+#live-feed .liverow::before {
+  content: "";
+  position: absolute; left: -20px; top: 15px;
+  width: 11px; height: 11px; border-radius: 50%;
+  background: var(--card);
+  border: 2.5px solid var(--ink-3);
+}
+#live-feed .k-request::before  { border-color: #c8322c; }
+#live-feed .k-issue::before    { border-color: var(--accent); }
+#live-feed .k-report::before   { border-color: #c07004; }
+#live-feed .k-resource::before { border-color: #127a4b; }
+#live-feed .k-feed::before     { border-color: #7a4bd0; }
+/* A request nobody has answered yet keeps a live ring, so an unanswered ask
+   is visible from across a room rather than needing to be read. */
+#live-feed .liverow:has(.a-waiting)::before {
+  box-shadow: 0 0 0 4px color-mix(in srgb, #c8322c 20%, transparent);
+}
+
+.liverow .kind { font-size: .61rem; }
+.liverow h4 { font-size: .94rem; font-weight: 650; }
+
+/* ── surfaces ───────────────────────────────────────────── */
+
+.card { border-radius: 10px; }
+.map { border-radius: 8px; }
+.commsbanner { border-left: 4px solid var(--reviewing); }
+.commsbanner.l-critical { border-left-color: #c8322c; }
+
+/* Reporter follow-ups read as the other voice in the conversation. */
+.timeline li.from-reporter::before { background: var(--accent); border-color: var(--accent); }
+.timeline li.is-urgent::before { border-color: #c8322c; background: #c8322c; }
+.needs-attention {
+  border-color: #c8322c !important;
+  background: color-mix(in srgb, #c8322c 6%, var(--card));
+}

@@ -240,6 +240,10 @@ class Handler(BaseHTTPRequestHandler):
         if match:
             return self._post_status(match.group(1), body)
 
+        match = re.fullmatch(r"/api/reports/([^/]+)/followup", path)
+        if match:
+            return self._post_followup(match.group(1), body)
+
         return self._error(404, "no such endpoint")
 
     # -- chat --------------------------------------------------------------
@@ -591,6 +595,26 @@ class Handler(BaseHTTPRequestHandler):
                 record.setdefault("raw", {})["hazard_context"] = context
 
         lookup_async(lat, lng, attach)
+
+    def _post_followup(self, reference: str, body: dict) -> None:
+        """The reporter updating their own report. No card needed — they hold
+        the reference code, which is the whole claim this system recognises.
+        """
+        reference = reference.upper()
+        if not _REF_RE.match(reference):
+            return self._error(400, "that is not a valid reference code")
+        try:
+            self.service.add_followup(
+                reference, kind=str(body.get("kind") or ""),
+                note=str(body.get("note") or "")[:1000],
+                author_id=str(body.get("author_id") or "")[:64] or None)
+        except KeyError:
+            return self._error(404, "no report with that reference code")
+        except StoreFull as exc:
+            return self._error(503, str(exc))
+        except ValueError as exc:
+            return self._error(400, str(exc))
+        return self._send(201, {"ok": True})
 
     def _post_status(self, reference: str, body: dict) -> None:
         session = self.require("report.status")

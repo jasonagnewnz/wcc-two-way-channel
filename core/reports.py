@@ -26,6 +26,7 @@ MODULE_ID = "team-6-two-way"
 
 REPORT_TYPE = "community-report"
 STATUS_TYPE = "report-status"
+FOLLOWUP_TYPE = "report-followup"
 
 # The one-tap vocabulary. Deliberately small and fixed: staff during an event
 # tap a button, they do not compose a sentence. Kept clear of track4's
@@ -43,6 +44,26 @@ STATUS_LABELS = {
     RESPONDING: "Crew responding",
     RESOLVED: "Resolved",
 }
+
+# What a reporter can say AFTER their first report.
+#
+# The channel was two-way in name only until this existed: WCC could answer,
+# but the person who reported it had no way to say "it's worse now" or "it's
+# cleared, stand down" — so the council's picture froze at the moment of the
+# first message, which is exactly when it is least accurate.
+#
+# `resolved` matters most. A resident saying "the water has gone" releases a
+# crew, and nothing else in the system could ever tell WCC that.
+FOLLOWUPS = {
+    "still": "Still happening",
+    "worse": "Getting worse",
+    "better": "Easing off",
+    "resolved": "It's cleared",
+    "detail": "Adding detail",
+}
+
+# The ones a duty officer needs to see immediately rather than in due course.
+URGENT_FOLLOWUPS = ("worse",)
 
 # What a resident can report. Free text stays the primary field; this is only
 # to make grouping and map symbology possible.
@@ -189,6 +210,45 @@ class ReportService:
         )
         return self.store.publish(signal)
 
+    def add_followup(self, reference: str, *, kind: str, note: str = "",
+                     author_id: str | None = None) -> dict:
+        """The reporter speaks again about their own report.
+
+        Chained like everything else, so the report's page reads as one
+        conversation: what was reported, what WCC said, what the reporter saw
+        next. Never edits the original — the first description stays exactly
+        as it was written, which matters when the two disagree.
+        """
+        if kind not in FOLLOWUPS:
+            raise ValueError(f"kind must be one of {sorted(FOLLOWUPS)}")
+        report = self.store.get(reference)
+        if report is None or report.get("signal_type") != REPORT_TYPE:
+            raise KeyError(f"no report with reference {reference!r}")
+
+        return self.store.publish(make_signal(
+            module_id=self.module_id,
+            title=f"Reporter: {FOLLOWUPS[kind]}",
+            signal_type=FOLLOWUP_TYPE,
+            source_type="community",
+            description=(note or "").strip()[:1000],
+            severity="severe" if kind in URGENT_FOLLOWUPS else "unknown",
+            raw={"original_signal_id": reference, "kind": kind,
+                 "label": FOLLOWUPS[kind], "author_id": author_id,
+                 "urgent": kind in URGENT_FOLLOWUPS},
+        ))
+
+    def followups(self, reference: str) -> list[dict]:
+        return [
+            {"kind": (s.get("raw") or {}).get("kind"),
+             "label": (s.get("raw") or {}).get("label"),
+             "note": s.get("description", ""),
+             "urgent": bool((s.get("raw") or {}).get("urgent")),
+             "at": s.get("created_at")}
+            for s in self.store.fetch(limit=0, signal_type=FOLLOWUP_TYPE,
+                                      module_id=self.module_id)
+            if (s.get("raw") or {}).get("original_signal_id") == reference
+        ]
+
     # -- reads -------------------------------------------------------------
 
     def timeline(self, reference: str) -> list[dict]:
@@ -209,8 +269,25 @@ class ReportService:
         if report is None or report.get("signal_type") != REPORT_TYPE:
             return None
         chain = self.timeline(reference)
+        conversation = [
+            {"who": "wcc", "status": s["raw"]["status"],
+             "label": STATUS_LABELS.get(s["raw"]["status"], s["raw"]["status"]),
+             "note": s.get("description", ""),
+             "actor": s["raw"].get("actor", ""), "at": s.get("created_at")}
+            for s in chain
+        ] + [
+            {"who": "reporter", "status": f["kind"], "label": f["label"],
+             "note": f["note"], "actor": "You", "at": f["at"],
+             "urgent": f["urgent"]}
+            for f in self.followups(reference)
+        ]
+        conversation.sort(key=lambda e: e.get("at") or "")
+
         return {
             "report": report,
+            "conversation": conversation,
+            "followups": self.followups(reference),
+            "followup_kinds": FOLLOWUPS,
             "status": chain[-1]["raw"]["status"] if chain else None,
             "status_label": STATUS_LABELS.get(
                 chain[-1]["raw"]["status"] if chain else "", "Submitted"),
@@ -236,8 +313,11 @@ class ReportService:
             ref = report["id"]
             chain = self.timeline(ref)
             status = chain[-1]["raw"]["status"] if chain else None
+            recent = self.followups(ref)
             out.append({
                 **report,
+                "followups": recent,
+                "needs_attention": any(f["urgent"] for f in recent),
                 "status": status,
                 "status_label": STATUS_LABELS.get(status or "", "Submitted"),
                 "updates": len(chain),
